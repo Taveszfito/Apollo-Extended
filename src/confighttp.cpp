@@ -26,6 +26,7 @@
 
 // local includes
 #include "config.h"
+#include "controller_diagnostics.h"
 #include "confighttp.h"
 #include "crypto.h"
 #include "display_device.h"
@@ -1154,6 +1155,39 @@ namespace confighttp {
     response->write(SimpleWeb::StatusCode::success_ok, content, headers);
   }
 
+  void getControllerDiagnostics(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+
+    const auto now = controller_diagnostics::now_ms();
+    const auto age = [now](std::int64_t timestamp) -> std::int64_t {
+      return timestamp == 0 ? -1 : std::max<std::int64_t>(0, now - timestamp);
+    };
+    nlohmann::json result {
+      {"client_packets", controller_diagnostics::client_packets.load()},
+      {"client_packet_age_ms", age(controller_diagnostics::last_client_packet_ms.load())},
+      {"buttons", controller_diagnostics::last_buttons.load()},
+      {"left_trigger", controller_diagnostics::last_left_trigger.load()},
+      {"right_trigger", controller_diagnostics::last_right_trigger.load()},
+      {"left_x", controller_diagnostics::last_left_x.load()},
+      {"left_y", controller_diagnostics::last_left_y.load()},
+      {"right_x", controller_diagnostics::last_right_x.load()},
+      {"right_y", controller_diagnostics::last_right_y.load()},
+      {"submit_attempts", controller_diagnostics::state_submit_attempts.load()},
+      {"submit_successes", controller_diagnostics::state_submit_successes.load()},
+      {"submit_failures", controller_diagnostics::state_submit_failures.load()},
+      {"submit_age_ms", age(controller_diagnostics::last_state_submit_ms.load())},
+      {"submit_failure_age_ms", age(controller_diagnostics::last_state_submit_failure_ms.load())},
+      {"output_reports", controller_diagnostics::output_reports.load()},
+      {"output_report_age_ms", age(controller_diagnostics::last_output_report_ms.load())},
+      {"device_creates", controller_diagnostics::device_creates.load()},
+      {"device_closes", controller_diagnostics::device_closes.load()},
+      {"device_present", controller_diagnostics::device_present.load()}
+    };
+    send_response(response, result);
+  }
+
   /**
    * @brief Update existing credentials.
    * @param response The HTTP response object.
@@ -1540,6 +1574,7 @@ namespace confighttp {
     server.resource["^/api/apps/launch$"]["POST"] = launchApp;
     server.resource["^/api/apps/close$"]["POST"] = closeApp;
     server.resource["^/api/logs$"]["GET"] = getLogs;
+    server.resource["^/api/controller-diagnostics$"]["GET"] = getControllerDiagnostics;
     server.resource["^/api/config$"]["GET"] = getConfig;
     server.resource["^/api/config$"]["POST"] = saveConfig;
     server.resource["^/api/configLocale$"]["GET"] = getLocale;

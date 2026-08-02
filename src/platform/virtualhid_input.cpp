@@ -19,6 +19,7 @@
 
 // local includes
 #include "src/config.h"
+#include "src/controller_diagnostics.h"
 #include "src/logging.h"
 #include "virtualhid_input.h"
 
@@ -339,6 +340,7 @@ namespace platf::virtualhid {
     }
 
     void handle_output(const std::shared_ptr<gamepad_context_t> &gamepad, const lvh::GamepadOutput &output) {
+      controller_diagnostics::record_output_report();
       // Artemis Extended player LED transport. In a DualSense USB output
       // report, valid flag 1 is byte 2 and the five-bit mask is byte 44.
       if (output.raw_report.size() >= 45 && output.raw_report[0] == 0x02 &&
@@ -560,6 +562,8 @@ namespace platf::virtualhid {
     }
 
     context.gamepads[id.globalIndex] = std::move(gamepad);
+    controller_diagnostics::device_present = true;
+    ++controller_diagnostics::device_creates;
     return 0;
   }
 
@@ -572,6 +576,8 @@ namespace platf::virtualhid {
       context.gamepads[nr]->adapter->set_output_callback({});
       log_failure("close libvirtualhid gamepad"sv, context.gamepads[nr]->adapter->close());
       context.gamepads[nr].reset();
+      controller_diagnostics::device_present = false;
+      ++controller_diagnostics::device_closes;
     }
   }
 
@@ -581,7 +587,9 @@ namespace platf::virtualhid {
     }
 
     auto &gamepad = context.gamepads[nr];
-    log_failure("submit libvirtualhid gamepad state"sv, gamepad->adapter->set_state(make_gamepad_state(state, gamepad->adapter->support())));
+    const auto status = gamepad->adapter->set_state(make_gamepad_state(state, gamepad->adapter->support()));
+    controller_diagnostics::record_state_submit(status.ok());
+    log_failure("submit libvirtualhid gamepad state"sv, status);
   }
 
   void gamepad_touch(input_context_t &context, const gamepad_touch_t &touch) {

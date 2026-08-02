@@ -117,9 +117,10 @@ set(CPACK_COMPONENT_FIREWALL_DESCRIPTION "Scripts to enable or disable firewall 
 set(CPACK_COMPONENT_FIREWALL_GROUP "Scripts")
 
 # gamepad scripts
-set(CPACK_COMPONENT_GAMEPAD_DISPLAY_NAME "Virtual Gamepad")
-set(CPACK_COMPONENT_GAMEPAD_DESCRIPTION "Scripts to install and uninstall Virtual Gamepad.")
-set(CPACK_COMPONENT_GAMEPAD_GROUP "Scripts")
+set(CPACK_COMPONENT_GAMEPAD_DISPLAY_NAME "Virtual Gamepad Drivers")
+set(CPACK_COMPONENT_GAMEPAD_DESCRIPTION "Installs the bundled libvirtualhid DualSense driver and ViGEmBus compatibility driver.")
+set(CPACK_COMPONENT_GAMEPAD_GROUP "Drivers")
+set(CPACK_COMPONENT_GAMEPAD_REQUIRED true)
 
 # include specific packaging
 include(${CMAKE_MODULE_PATH}/packaging/windows_nsis.cmake)

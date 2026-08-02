@@ -21,6 +21,7 @@ extern "C" {
 
 // local includes
 #include "config.h"
+#include "controller_diagnostics.h"
 #include "globals.h"
 #include "input.h"
 #include "logging.h"
@@ -1190,6 +1191,11 @@ namespace input {
       packet->rightStickX,
       packet->rightStickY
     };
+
+    controller_diagnostics::record_client_packet(
+      gamepad_state.buttonFlags, packet->leftTrigger, packet->rightTrigger,
+      packet->leftStickX, packet->leftStickY,
+      packet->rightStickX, packet->rightStickY);
 
     auto bf_new = gamepad_state.buttonFlags;
     switch (gamepad.back_button_state) {

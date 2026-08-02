@@ -40,6 +40,42 @@
   <Navbar></Navbar>
   <div class="container">
     <h1 class="my-4">{{ $t('troubleshooting.troubleshooting') }}</h1>
+    <div class="card p-2 my-4">
+      <div class="card-body">
+        <h2 id="controller-pipeline">Apollo Extended Controller Pipeline</h2>
+        <p>Live counters show exactly where controller forwarding stops. Values refresh every second.</p>
+        <div class="row g-3" v-if="controllerDiag">
+          <div class="col-md-4">
+            <div class="border rounded p-3 h-100">
+              <h5>1. Artemis → Apollo</h5>
+              <span class="badge" :class="ageClass(controllerDiag.client_packet_age_ms)">{{ ageText(controllerDiag.client_packet_age_ms) }}</span>
+              <div class="mt-2">Packets: {{ controllerDiag.client_packets }}</div>
+              <small>Buttons: {{ controllerDiag.buttons }} · LT/RT: {{ controllerDiag.left_trigger }}/{{ controllerDiag.right_trigger }}</small><br>
+              <small>L: {{ controllerDiag.left_x }}, {{ controllerDiag.left_y }} · R: {{ controllerDiag.right_x }}, {{ controllerDiag.right_y }}</small>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="border rounded p-3 h-100">
+              <h5>2. Apollo → libvirtualhid</h5>
+              <span class="badge" :class="ageClass(controllerDiag.submit_age_ms)">{{ ageText(controllerDiag.submit_age_ms) }}</span>
+              <div class="mt-2">Attempts: {{ controllerDiag.submit_attempts }}</div>
+              <small>Success: {{ controllerDiag.submit_successes }} · Failure: {{ controllerDiag.submit_failures }}</small><br>
+              <small>Last failure: {{ ageText(controllerDiag.submit_failure_age_ms) }}</small>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="border rounded p-3 h-100">
+              <h5>3. Virtual DualSense → Apollo</h5>
+              <span class="badge" :class="controllerDiag.device_present ? 'bg-success' : 'bg-danger'">{{ controllerDiag.device_present ? 'Device present' : 'No device' }}</span>
+              <div class="mt-2">Output reports: {{ controllerDiag.output_reports }}</div>
+              <small>Last output: {{ ageText(controllerDiag.output_report_age_ms) }}</small><br>
+              <small>Create/close: {{ controllerDiag.device_creates }}/{{ controllerDiag.device_closes }}</small>
+            </div>
+          </div>
+        </div>
+        <div class="alert alert-danger mt-3" v-if="controllerDiagError">Diagnostics API unavailable: {{ controllerDiagError }}</div>
+      </div>
+    </div>
     <!-- Force Close App -->
     <div class="card p-2 my-4">
       <div class="card-body">
@@ -155,6 +191,9 @@
           serverQuitting: false,
           serverQuit: false,
           platform: "",
+          controllerDiag: null,
+          controllerDiagError: null,
+          controllerDiagInterval: null,
         };
       },
       computed: {
@@ -176,11 +215,30 @@
           this.refreshLogs();
         }, 5000);
         this.refreshLogs();
+        this.refreshControllerDiagnostics();
+        this.controllerDiagInterval = setInterval(() => this.refreshControllerDiagnostics(), 1000);
       },
       beforeDestroy() {
         clearInterval(this.logInterval);
+        clearInterval(this.controllerDiagInterval);
       },
       methods: {
+        ageText(age) {
+          if (age === null || age === undefined || age < 0) return 'Never';
+          if (age < 1000) return age + ' ms ago';
+          return (age / 1000).toFixed(1) + ' s ago';
+        },
+        ageClass(age) {
+          if (age < 0 || age > 3000) return 'bg-danger';
+          if (age > 1000) return 'bg-warning text-dark';
+          return 'bg-success';
+        },
+        refreshControllerDiagnostics() {
+          fetch('./api/controller-diagnostics', { credentials: 'include' })
+            .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+            .then(r => { this.controllerDiag = r; this.controllerDiagError = null; })
+            .catch(e => { this.controllerDiagError = e.message; });
+        },
         refreshLogs() {
           fetch("./api/logs", {
             credentials: 'include'
