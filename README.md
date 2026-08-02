@@ -1,4 +1,4 @@
-# Apollo Extended
+# Apollo Extended (Alpha, release coming when stable) 
 
 This fork is based on [Apollo](https://github.com/ClassicOldSong/Apollo) and adds native DualSense host emulation for [Artemis Android Extended](https://github.com/Taveszfito/moonlight-android).
 
