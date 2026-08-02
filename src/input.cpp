@@ -1708,7 +1708,26 @@ namespace input {
     task_pool.cancel(input->mouse_left_button_timeout);
 
     // Ensure input is synchronous, by using the task_pool
-    task_pool.push([]() {
+    task_pool.push([input]() {
+      // A streaming session may remain allocated for resume after its control
+      // peer has disconnected. Do not leave its virtual controllers alive until
+      // the input_t destructor eventually runs: games can keep the stale HID
+      // open and the next session then targets a dead device. Release every
+      // controller as part of the session reset and disarm gamepad_t's deferred
+      // destructor cleanup.
+      for (auto &gamepad : input->gamepads) {
+        if (gamepad.id < 0) {
+          continue;
+        }
+
+        BOOST_LOG(info) << "Releasing virtual controller for ended input session: id "sv
+                        << gamepad.id;
+        free_gamepad(platf_input, gamepad.id);
+        gamepad.id = -1;
+        gamepad.extended_emulation_mode = 0xFF;
+        gamepad.gamepad_state = {};
+      }
+
       for (int x = 0; x < mouse_press.size(); ++x) {
         if (mouse_press[x]) {
           platf::button_mouse(platf_input, x, true);
