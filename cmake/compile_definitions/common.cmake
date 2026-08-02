@@ -48,6 +48,12 @@ elseif(UNIX)
     endif()
 endif()
 
+add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/libvirtualhid")
+list(APPEND SUNSHINE_EXTERNAL_LIBRARIES libvirtualhid::libvirtualhid)
+list(APPEND PLATFORM_TARGET_FILES
+        "${CMAKE_SOURCE_DIR}/src/platform/virtualhid_input.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/virtualhid_input.cpp")
+
 include_directories(BEFORE SYSTEM "${CMAKE_SOURCE_DIR}/third-party/nv-codec-headers/include")
 file(GLOB NVENC_SOURCES CONFIGURE_DEPENDS "src/nvenc/*.cpp" "src/nvenc/*.h")
 list(APPEND PLATFORM_TARGET_FILES ${NVENC_SOURCES})

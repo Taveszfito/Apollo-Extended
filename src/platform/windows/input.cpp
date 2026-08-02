@@ -21,6 +21,7 @@
 #include "src/globals.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
+#include "src/platform/virtualhid_input.h"
 
 #ifdef __MINGW32__
 // DECLARE_HANDLE(HSYNTHETICPOINTERDEVICE);
@@ -446,6 +447,7 @@ namespace platf {
     }
 
     vigem_t *vigem;
+    virtualhid::input_context_t virtualhid;
 
     decltype(CreateSyntheticPointerDevice) *fnCreateSyntheticPointerDevice;
     decltype(InjectSyntheticPointerInput) *fnInjectSyntheticPointerInput;
@@ -1175,6 +1177,11 @@ namespace platf {
   int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_t &metadata, feedback_queue_t feedback_queue) {
     auto raw = (input_raw_t *) input.get();
 
+    if (config::input.gamepad == "ds5"sv) {
+      BOOST_LOG(info) << "Gamepad " << id.globalIndex << " will be a native USB DualSense controller (manual selection)"sv;
+      return virtualhid::alloc_gamepad(raw->virtualhid, id, metadata, std::move(feedback_queue));
+    }
+
     if (!raw->vigem) {
       return 0;
     }
@@ -1228,6 +1235,11 @@ namespace platf {
 
   void free_gamepad(input_t &input, int nr) {
     auto raw = (input_raw_t *) input.get();
+
+    if (virtualhid::has_gamepad(raw->virtualhid, nr)) {
+      virtualhid::free_gamepad(raw->virtualhid, nr);
+      return;
+    }
 
     if (!raw->vigem) {
       return;
@@ -1487,7 +1499,13 @@ namespace platf {
    * @param gamepad_state The gamepad button/axis state sent from the client.
    */
   void gamepad_update(input_t &input, int nr, const gamepad_state_t &gamepad_state) {
-    auto vigem = ((input_raw_t *) input.get())->vigem;
+    auto raw = (input_raw_t *) input.get();
+    if (virtualhid::has_gamepad(raw->virtualhid, nr)) {
+      virtualhid::gamepad_update(raw->virtualhid, nr, gamepad_state);
+      return;
+    }
+
+    auto vigem = raw->vigem;
 
     // If there is no gamepad support
     if (!vigem) {
@@ -1519,7 +1537,13 @@ namespace platf {
    * @param touch The touch event.
    */
   void gamepad_touch(input_t &input, const gamepad_touch_t &touch) {
-    auto vigem = ((input_raw_t *) input.get())->vigem;
+    auto raw = (input_raw_t *) input.get();
+    if (virtualhid::has_gamepad(raw->virtualhid, touch.id.globalIndex)) {
+      virtualhid::gamepad_touch(raw->virtualhid, touch);
+      return;
+    }
+
+    auto vigem = raw->vigem;
 
     // If there is no gamepad support
     if (!vigem) {
@@ -1625,7 +1649,13 @@ namespace platf {
    * @param motion The motion event.
    */
   void gamepad_motion(input_t &input, const gamepad_motion_t &motion) {
-    auto vigem = ((input_raw_t *) input.get())->vigem;
+    auto raw = (input_raw_t *) input.get();
+    if (virtualhid::has_gamepad(raw->virtualhid, motion.id.globalIndex)) {
+      virtualhid::gamepad_motion(raw->virtualhid, motion);
+      return;
+    }
+
+    auto vigem = raw->vigem;
 
     // If there is no gamepad support
     if (!vigem) {
@@ -1652,7 +1682,13 @@ namespace platf {
    * @param battery The battery event.
    */
   void gamepad_battery(input_t &input, const gamepad_battery_t &battery) {
-    auto vigem = ((input_raw_t *) input.get())->vigem;
+    auto raw = (input_raw_t *) input.get();
+    if (virtualhid::has_gamepad(raw->virtualhid, battery.id.globalIndex)) {
+      virtualhid::gamepad_battery(raw->virtualhid, battery);
+      return;
+    }
+
+    auto vigem = raw->vigem;
 
     // If there is no gamepad support
     if (!vigem) {
@@ -1731,6 +1767,7 @@ namespace platf {
         supported_gamepad_t {"auto", true, ""},
         supported_gamepad_t {"x360", false, ""},
         supported_gamepad_t {"ds4", false, ""},
+        supported_gamepad_t {"ds5", false, ""},
       };
 
       return gps;
@@ -1739,13 +1776,22 @@ namespace platf {
     auto vigem = ((input_raw_t *) input)->vigem;
     auto enabled = vigem != nullptr;
     auto reason = enabled ? "" : "gamepads.vigem-not-available";
+    auto &virtualhid = ((input_raw_t *) input)->virtualhid;
+    auto dualsense_enabled = virtualhid.runtime && virtualhid.runtime->capabilities().supports_gamepad;
+    auto dualsense_reason = dualsense_enabled ? "" : "gamepads.virtualhid-not-available";
 
     // ds4 == ps4
     static std::vector gps {
       supported_gamepad_t {"auto", true, reason},
       supported_gamepad_t {"x360", enabled, reason},
-      supported_gamepad_t {"ds4", enabled, reason}
+      supported_gamepad_t {"ds4", enabled, reason},
+      supported_gamepad_t {"ds5", dualsense_enabled, dualsense_reason}
     };
+
+    gps[0] = {"auto", true, ""};
+    gps[1] = {"x360", enabled, reason};
+    gps[2] = {"ds4", enabled, reason};
+    gps[3] = {"ds5", dualsense_enabled, dualsense_reason};
 
     for (auto &[name, is_enabled, reason_disabled] : gps) {
       if (!is_enabled) {

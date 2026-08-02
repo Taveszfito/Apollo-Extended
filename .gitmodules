@@ -66,3 +66,6 @@
 	path = third-party/moonlight-common-c
 	url = https://github.com/ClassicOldSong/moonlight-common-c
 	branch = master
+[submodule "third-party/libvirtualhid"]
+	path = third-party/libvirtualhid
+	url = https://github.com/LizardByte/libvirtualhid.git
