@@ -900,7 +900,10 @@ namespace nvhttp {
     tree.put("root.<xmlattr>.status_code", 200);
     tree.put("root.hostname", config::nvhttp.sunshine_name);
 
-    tree.put("root.appversion", VERSION);
+    // Moonlight uses a negative fourth app-version component to identify the
+    // Sunshine protocol family. Local/dirty Apollo builds otherwise advertise
+    // 0.0.0.dirty and the client silently suppresses controller-arrival events.
+    tree.put("root.appversion", "7.1.431.-1");
     tree.put("root.GfeVersion", GFE_VERSION);
     tree.put("root.uniqueid", http::unique_id);
     tree.put("root.HttpsPort", net::map_port(PORT_HTTPS));

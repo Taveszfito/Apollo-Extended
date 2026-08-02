@@ -109,6 +109,7 @@ namespace platf {
     set_motion_event_state,  ///< Set motion event state
     set_rgb_led,  ///< Set RGB LED
     set_adaptive_triggers,  ///< Set adaptive triggers
+    extended_emulation_ack,  ///< Apollo Extended controller negotiation response
   };
 
   struct gamepad_feedback_msg_t {
@@ -153,6 +154,14 @@ namespace platf {
       return msg;
     }
 
+    static gamepad_feedback_msg_t make_extended_emulation_ack(std::uint16_t id, std::uint8_t requested, std::uint8_t accepted, std::uint8_t status) {
+      gamepad_feedback_msg_t msg;
+      msg.type = gamepad_feedback_e::extended_emulation_ack;
+      msg.id = id;
+      msg.data.extended_emulation = {requested, accepted, status};
+      return msg;
+    }
+
     gamepad_feedback_e type;
     std::uint16_t id;
 
@@ -186,6 +195,12 @@ namespace platf {
         std::array<uint8_t, 10> left;
         std::array<uint8_t, 10> right;
       } adaptive_triggers;
+
+      struct {
+        std::uint8_t requested;
+        std::uint8_t accepted;
+        std::uint8_t status;
+      } extended_emulation;
     } data;
   };
 

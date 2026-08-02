@@ -883,6 +883,23 @@ namespace stream {
         encrypted_payload;
 
       payload = encode_control(session, util::view(plaintext), encrypted_payload);
+    } else if (msg.type == platf::gamepad_feedback_e::extended_emulation_ack) {
+      control_adaptive_triggers_t plaintext {};
+      plaintext.header.type = packetTypes[IDX_SET_ADAPTIVE_TRIGGERS];
+      plaintext.header.payloadLength = sizeof(plaintext) - sizeof(control_header_v2);
+      plaintext.id = util::endian::little(msg.id);
+      plaintext.event_flags = 0x40;
+      plaintext.type_left = 0x41;  // 'A'
+      plaintext.type_right = 0x45;  // 'E'
+      plaintext.left[0] = 0x58;  // 'X'
+      plaintext.left[1] = 1;
+      plaintext.left[2] = msg.data.extended_emulation.requested;
+      plaintext.left[3] = msg.data.extended_emulation.accepted;
+      plaintext.left[4] = msg.data.extended_emulation.status;
+
+      std::array<std::uint8_t, sizeof(control_encrypted_t) + crypto::cipher::round_to_pkcs7_padded(sizeof(plaintext)) + crypto::cipher::tag_size>
+        encrypted_payload;
+      payload = encode_control(session, util::view(plaintext), encrypted_payload);
     } else {
       BOOST_LOG(error) << "Unknown gamepad feedback message type"sv;
       return -1;

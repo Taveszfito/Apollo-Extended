@@ -127,6 +127,7 @@ namespace input {
         gamepad_state {},
         back_timeout_id {},
         id {-1},
+        extended_emulation_mode {0xFF},
         back_button_state {button_state_e::NONE} {
     }
 
@@ -143,6 +144,7 @@ namespace input {
     thread_pool_util::ThreadPool::task_id_t back_timeout_id;
 
     int id;
+    std::uint8_t extended_emulation_mode;
 
     // When emulating the HOME button, we may need to artificially release the back button.
     // Afterwards, the gamepad state on sunshine won't match the state on Moonlight.
@@ -844,15 +846,17 @@ namespace input {
       return;
     }
 
-    if (input->gamepads[packet->controllerNumber].id >= 0) {
-      BOOST_LOG(warning) << "ControllerNumber already allocated ["sv << packet->controllerNumber << ']';
-      return;
-    }
-
     auto controller_type = packet->type;
     auto capabilities = util::endian::little(packet->capabilities);
-    if ((capabilities & platf::LI_CCAP_EXTENDED_EMULATION_MASK) == platf::LI_CCAP_EXTENDED_EMULATION_MAGIC) {
+    const auto is_extended = (capabilities & platf::LI_CCAP_EXTENDED_EMULATION_MASK) == platf::LI_CCAP_EXTENDED_EMULATION_MAGIC;
+    std::uint8_t requested = 0;
+    std::uint8_t accepted = 0;
+    if (is_extended) {
       const auto requested_mode = capabilities & platf::LI_CCAP_EXTENDED_EMULATION_MODE_MASK;
+      requested = static_cast<std::uint8_t>(requested_mode >> 8);
+      if (requested < 1 || requested > 3) {
+        requested = packet->type == LI_CTYPE_PS ? 2 : 1;
+      }
       switch (requested_mode) {
         case platf::LI_CCAP_EXTENDED_EMULATION_XBOX:
           controller_type = LI_CTYPE_XBOX;
@@ -867,10 +871,19 @@ namespace input {
           break;
       }
       capabilities &= ~platf::LI_CCAP_EXTENDED_EMULATION_MASK;
-      BOOST_LOG(info) << "Artemis Extended controller negotiation: player "sv
-                      << static_cast<int>(packet->controllerNumber) << ", requested mode "sv
-                      << static_cast<int>(requested_mode >> 8) << ", effective client type "sv
-                      << static_cast<int>(controller_type);
+      accepted = requested;
+      if (config::input.gamepad == "x360"sv) accepted = 1;
+      else if (config::input.gamepad == "ds4"sv) accepted = 2;
+      else if (config::input.gamepad == "ds5"sv) accepted = 3;
+      controller_type = accepted == 1 ? static_cast<std::uint8_t>(LI_CTYPE_XBOX) :
+        (accepted == 2 ? platf::LI_CTYPE_PS4_EXTENDED : platf::LI_CTYPE_PS5_EXTENDED);
+      BOOST_LOG(info) << "Apollo Extended emulation request: player "sv
+                      << static_cast<int>(packet->controllerNumber) << ", requested "sv
+                      << static_cast<int>(requested) << ", accepted "sv
+                      << static_cast<int>(accepted) << ", host setting "sv << config::input.gamepad;
+    } else if (input->gamepads[packet->controllerNumber].id >= 0) {
+      BOOST_LOG(warning) << "ControllerNumber already allocated ["sv << packet->controllerNumber << ']';
+      return;
     }
 
     platf::gamepad_arrival_t arrival {
@@ -879,18 +892,41 @@ namespace input {
       util::endian::little(packet->supportedButtonFlags),
     };
 
-    auto id = alloc_id(gamepadMask);
-    if (id < 0) {
+    auto &gamepad = input->gamepads[packet->controllerNumber];
+    std::uint8_t status = 0;
+    auto id = gamepad.id;
+    if (is_extended && id >= 0 && gamepad.extended_emulation_mode != accepted) {
+      platf::gamepad_update(platf_input, id, platf::gamepad_state_t {});
+      platf::free_gamepad(platf_input, id);
+    } else if (is_extended && id >= 0) {
+      if (input->feedback_queue) {
+        input->feedback_queue->raise(platf::gamepad_feedback_msg_t::make_extended_emulation_ack(
+          packet->controllerNumber, requested, accepted, 0));
+      }
       return;
+    } else {
+      id = alloc_id(gamepadMask);
     }
 
-    // Allocate a new gamepad
-    if (platf::alloc_gamepad(platf_input, {id, packet->controllerNumber}, arrival, input->feedback_queue)) {
-      free_id(gamepadMask, id);
-      return;
+    if (id < 0 || platf::alloc_gamepad(platf_input, {id, packet->controllerNumber}, arrival, input->feedback_queue)) {
+      status = 1;
+      if (id >= 0) free_id(gamepadMask, id);
+      gamepad.id = -1;
+      gamepad.extended_emulation_mode = 0xFF;
+    } else {
+      gamepad.id = id;
+      gamepad.extended_emulation_mode = is_extended ? accepted : 0xFF;
+      if (is_extended) {
+        BOOST_LOG(info) << "Apollo Extended replaced virtual controller for player "sv
+                        << static_cast<int>(packet->controllerNumber) << " with mode "sv
+                        << static_cast<int>(accepted);
+      }
     }
 
-    input->gamepads[packet->controllerNumber].id = id;
+    if (is_extended && input->feedback_queue) {
+      input->feedback_queue->raise(platf::gamepad_feedback_msg_t::make_extended_emulation_ack(
+        packet->controllerNumber, requested, accepted, status));
+    }
   }
 
   /**
