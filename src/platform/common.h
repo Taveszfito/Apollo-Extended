@@ -314,6 +314,18 @@ namespace platf {
   constexpr std::uint8_t LI_CTYPE_PS4_EXTENDED = 0x04;
   constexpr std::uint8_t LI_CTYPE_PS5_EXTENDED = 0x05;
 
+  // Apollo/Artemis Extended controller-emulation negotiation. The standard
+  // controller type remains valid for unmodified hosts, while these otherwise
+  // unused capability bits let an Extended host distinguish DS4 from DS5 and
+  // honour an explicit client preference when the host is configured for auto.
+  constexpr std::uint16_t LI_CCAP_EXTENDED_EMULATION_MASK = 0xFC00;
+  constexpr std::uint16_t LI_CCAP_EXTENDED_EMULATION_MAGIC = 0xEC00;
+  constexpr std::uint16_t LI_CCAP_EXTENDED_EMULATION_MODE_MASK = 0x0300;
+  constexpr std::uint16_t LI_CCAP_EXTENDED_EMULATION_AUTO = 0x0000;
+  constexpr std::uint16_t LI_CCAP_EXTENDED_EMULATION_XBOX = 0x0100;
+  constexpr std::uint16_t LI_CCAP_EXTENDED_EMULATION_DS4 = 0x0200;
+  constexpr std::uint16_t LI_CCAP_EXTENDED_EMULATION_DS5 = 0x0300;
+
   struct gamepad_touch_t {
     gamepad_id_t id;
     std::uint8_t eventType;

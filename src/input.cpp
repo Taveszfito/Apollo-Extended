@@ -849,9 +849,33 @@ namespace input {
       return;
     }
 
+    auto controller_type = packet->type;
+    auto capabilities = util::endian::little(packet->capabilities);
+    if ((capabilities & platf::LI_CCAP_EXTENDED_EMULATION_MASK) == platf::LI_CCAP_EXTENDED_EMULATION_MAGIC) {
+      const auto requested_mode = capabilities & platf::LI_CCAP_EXTENDED_EMULATION_MODE_MASK;
+      switch (requested_mode) {
+        case platf::LI_CCAP_EXTENDED_EMULATION_XBOX:
+          controller_type = LI_CTYPE_XBOX;
+          break;
+        case platf::LI_CCAP_EXTENDED_EMULATION_DS4:
+          controller_type = platf::LI_CTYPE_PS4_EXTENDED;
+          break;
+        case platf::LI_CCAP_EXTENDED_EMULATION_DS5:
+          controller_type = platf::LI_CTYPE_PS5_EXTENDED;
+          break;
+        default:
+          break;
+      }
+      capabilities &= ~platf::LI_CCAP_EXTENDED_EMULATION_MASK;
+      BOOST_LOG(info) << "Artemis Extended controller negotiation: player "sv
+                      << static_cast<int>(packet->controllerNumber) << ", requested mode "sv
+                      << static_cast<int>(requested_mode >> 8) << ", effective client type "sv
+                      << static_cast<int>(controller_type);
+    }
+
     platf::gamepad_arrival_t arrival {
-      packet->type,
-      util::endian::little(packet->capabilities),
+      controller_type,
+      capabilities,
       util::endian::little(packet->supportedButtonFlags),
     };
 
