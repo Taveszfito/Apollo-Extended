@@ -43,6 +43,8 @@ namespace platf::virtualhid {
     std::uint8_t last_red = 0;  ///< Last red LED value.
     std::uint8_t last_green = 0;  ///< Last green LED value.
     std::uint8_t last_blue = 0;  ///< Last blue LED value.
+    bool has_last_player_leds = false;  ///< Whether the last player LED mask is valid.
+    std::uint8_t last_player_leds = 0;  ///< Last DualSense player LED mask.
   };
 
   namespace {
@@ -337,6 +339,23 @@ namespace platf::virtualhid {
     }
 
     void handle_output(const std::shared_ptr<gamepad_context_t> &gamepad, const lvh::GamepadOutput &output) {
+      // Artemis Extended player LED transport. In a DualSense USB output
+      // report, valid flag 1 is byte 2 and the five-bit mask is byte 44.
+      if (output.raw_report.size() >= 45 && output.raw_report[0] == 0x02 &&
+          (output.raw_report[2] & 0x10) != 0) {
+        const auto player_leds = static_cast<std::uint8_t>(output.raw_report[44] & 0x1F);
+        if (!gamepad->has_last_player_leds || gamepad->last_player_leds != player_leds) {
+          gamepad->has_last_player_leds = true;
+          gamepad->last_player_leds = player_leds;
+          std::array<std::uint8_t, 10> payload {};
+          payload[0] = player_leds;
+          raise_feedback(gamepad, gamepad_feedback_msg_t::make_adaptive_triggers(
+            gamepad->client_relative_index, 0x80, 0, 0,
+            payload, std::array<std::uint8_t, 10> {}
+          ));
+        }
+      }
+
       switch (output.kind) {
         case lvh::GamepadOutputKind::rumble:
           if (gamepad->has_last_rumble && gamepad->last_low_frequency_rumble == output.low_frequency_rumble && gamepad->last_high_frequency_rumble == output.high_frequency_rumble) {
@@ -525,8 +544,11 @@ namespace platf::virtualhid {
     gamepad->adapter = std::move(created.adapter);
     gamepad->feedback_queue = std::move(feedback_queue);
     gamepad->client_relative_index = id.clientRelativeIndex;
-    gamepad->adapter->set_output_callback([gamepad](const lvh::GamepadOutput &output) {
-      handle_output(gamepad, output);
+    std::weak_ptr<gamepad_context_t> weak_gamepad = gamepad;
+    gamepad->adapter->set_output_callback([weak_gamepad](const lvh::GamepadOutput &output) {
+      if (const auto gamepad = weak_gamepad.lock()) {
+        handle_output(gamepad, output);
+      }
     });
 
     const auto &support = gamepad->adapter->support();
@@ -547,6 +569,8 @@ namespace platf::virtualhid {
 
   void free_gamepad(input_context_t &context, int nr) {
     if (has_gamepad(context, nr)) {
+      context.gamepads[nr]->adapter->set_output_callback({});
+      log_failure("close libvirtualhid gamepad"sv, context.gamepads[nr]->adapter->close());
       context.gamepads[nr].reset();
     }
   }
