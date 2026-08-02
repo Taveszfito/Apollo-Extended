@@ -309,6 +309,11 @@ namespace platf {
     std::uint32_t supportedButtons;
   };
 
+  // Artemis Extended protocol extensions. Legacy clients continue to use
+  // LI_CTYPE_PS, while extended clients can identify the Sony generation.
+  constexpr std::uint8_t LI_CTYPE_PS4_EXTENDED = 0x04;
+  constexpr std::uint8_t LI_CTYPE_PS5_EXTENDED = 0x05;
+
   struct gamepad_touch_t {
     gamepad_id_t id;
     std::uint8_t eventType;

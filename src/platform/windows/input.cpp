@@ -1177,8 +1177,11 @@ namespace platf {
   int alloc_gamepad(input_t &input, const gamepad_id_t &id, const gamepad_arrival_t &metadata, feedback_queue_t feedback_queue) {
     auto raw = (input_raw_t *) input.get();
 
-    if (config::input.gamepad == "ds5"sv) {
-      BOOST_LOG(info) << "Gamepad " << id.globalIndex << " will be a native USB DualSense controller (manual selection)"sv;
+    if (config::input.gamepad == "ds5"sv ||
+        (config::input.gamepad == "auto"sv && metadata.type == LI_CTYPE_PS5_EXTENDED)) {
+      BOOST_LOG(info) << "Gamepad " << id.globalIndex << " will be a native USB DualSense controller ("
+                      << (config::input.gamepad == "ds5"sv ? "manual selection"sv : "auto-selected by client-reported type"sv)
+                      << ")"sv;
       return virtualhid::alloc_gamepad(raw->virtualhid, id, metadata, std::move(feedback_queue));
     }
 
@@ -1194,7 +1197,7 @@ namespace platf {
     } else if (config::input.gamepad == "ds4"sv) {
       BOOST_LOG(info) << "Gamepad " << id.globalIndex << " will be DualShock 4 controller (manual selection)"sv;
       selectedGamepadType = DualShock4Wired;
-    } else if (metadata.type == LI_CTYPE_PS) {
+    } else if (metadata.type == LI_CTYPE_PS || metadata.type == LI_CTYPE_PS4_EXTENDED) {
       BOOST_LOG(info) << "Gamepad " << id.globalIndex << " will be DualShock 4 controller (auto-selected by client-reported type)"sv;
       selectedGamepadType = DualShock4Wired;
     } else if (metadata.type == LI_CTYPE_XBOX) {

@@ -94,6 +94,8 @@ namespace platf::virtualhid {
         case LI_CTYPE_XBOX:
           return xbox;
         case LI_CTYPE_PS:
+        case LI_CTYPE_PS4_EXTENDED:
+        case LI_CTYPE_PS5_EXTENDED:
           return playstation;
         case LI_CTYPE_NINTENDO:
           return nintendo;
@@ -116,7 +118,7 @@ namespace platf::virtualhid {
         return profile_for_name(config::input.gamepad);
       }
 
-      if (metadata.type == LI_CTYPE_PS) {
+      if (metadata.type == LI_CTYPE_PS5_EXTENDED) {
         BOOST_LOG(info) << "Gamepad will be DualSense controller (auto-selected by client-reported type)"sv;
         return profile_for_name("ds5"sv);
       }
