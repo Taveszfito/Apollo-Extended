@@ -7,6 +7,10 @@
 #include <fstream>
 #include <future>
 #include <queue>
+#ifdef _WIN32
+#include <deque>
+#include <mutex>
+#endif
 
 // lib includes
 #include <boost/endian/arithmetic.hpp>
@@ -21,6 +25,7 @@ extern "C" {
 
 // local includes
 #include "config.h"
+#include "controller_diagnostics.h"
 #include "crypto.h"
 #include "display_device.h"
 #include "globals.h"
@@ -34,6 +39,9 @@ extern "C" {
 #include "system_tray.h"
 #include "thread_safe.h"
 #include "utility.h"
+#ifdef _WIN32
+#include "platform/windows/dualsense_audio.h"
+#endif
 
 #define IDX_START_A 0
 #define IDX_START_B 1
@@ -53,6 +61,7 @@ extern "C" {
 #define IDX_SET_CLIPBOARD 16
 #define IDX_FILE_TRANSFER_NONCE_REQUEST 17
 #define IDX_SET_ADAPTIVE_TRIGGERS 18
+#define IDX_DUALSENSE_AUDIO 19
 
 static const short packetTypes[] = {
   0x0305,  // Start A
@@ -74,6 +83,7 @@ static const short packetTypes[] = {
   0x3001,  // Set Clipboard (Apollo protocol extension)
   0x3002,  // File transfer nonce request (Apollo protocol extension)
   0x5503,  // Set Adaptive triggers (Sunshine protocol extension)
+  0x5504,  // DualSense quad audio (Apollo Extended protocol extension)
 };
 
 namespace asio = boost::asio;
@@ -210,6 +220,17 @@ namespace stream {
     std::uint8_t right[DS_EFFECT_PAYLOAD_SIZE];
   };
 
+  struct control_dualsense_audio_t {
+    control_header_v2 header;
+    std::uint16_t id;
+    std::uint16_t sequence;
+    std::uint16_t frame_count;
+    std::uint8_t channels;
+    std::uint8_t flags;
+    // Interleaved signed little-endian PCM follows. Channels 1/2 carry the
+    // controller speaker/jack signal and channels 3/4 carry native haptics.
+  };
+
   struct control_hdr_mode_t {
     control_header_v2 header;
 
@@ -303,8 +324,8 @@ namespace stream {
       _map_type_cb.emplace(type, std::move(cb));
     }
 
-    int send(const std::string_view &payload, net::peer_t peer) {
-      auto packet = enet_packet_create(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
+    int send(const std::string_view &payload, net::peer_t peer, enet_uint32 flags = ENET_PACKET_FLAG_RELIABLE) {
+      auto packet = enet_packet_create(payload.data(), payload.size(), flags);
       if (enet_peer_send(peer, 0, packet)) {
         enet_packet_destroy(packet);
 
@@ -410,6 +431,18 @@ namespace stream {
       platf::feedback_queue_t feedback_queue;
       safe::mail_raw_t::event_t<video::hdr_info_t> hdr_queue;
     } control;
+
+#ifdef _WIN32
+    struct {
+      std::thread thread;
+      std::atomic_bool stop {false};
+      std::atomic_bool active {false};
+      std::mutex mutex;
+      std::deque<std::array<std::uint8_t, platf::dualsense_audio::bytes_per_packet>> packets;
+      std::uint16_t sequence = 0;
+      std::uint64_t dropped_packets = 0;
+    } dualsense_audio;
+#endif
 
     std::uint32_t launch_session_id;
     std::string device_name;
@@ -884,6 +917,50 @@ namespace stream {
 
       payload = encode_control(session, util::view(plaintext), encrypted_payload);
     } else if (msg.type == platf::gamepad_feedback_e::extended_emulation_ack) {
+#ifdef _WIN32
+      BOOST_LOG(info) << "DualSense audio negotiation: accepted="
+                      << static_cast<int>(msg.data.extended_emulation.accepted)
+                      << ", status=" << static_cast<int>(msg.data.extended_emulation.status)
+                      << ", active=" << session->dualsense_audio.active.load(std::memory_order_acquire);
+      if (msg.data.extended_emulation.accepted == 3 && msg.data.extended_emulation.status == 0 &&
+          !session->dualsense_audio.active.exchange(true)) {
+        if (session->dualsense_audio.thread.joinable()) {
+          session->dualsense_audio.thread.join();
+        }
+        session->dualsense_audio.stop.store(false, std::memory_order_release);
+        session->dualsense_audio.thread = std::thread {[session] {
+          BOOST_LOG(info) << "DualSense audio capture worker started";
+          while (!session->dualsense_audio.stop.load(std::memory_order_acquire)) {
+            const auto result = platf::dualsense_audio::capture(
+              session->dualsense_audio.stop,
+              [session](std::span<const std::uint8_t> pcm) {
+                if (!controller_diagnostics::dualsense_audio_capture_active.exchange(true)) {
+                  ++controller_diagnostics::dualsense_audio_capture_starts;
+                }
+                ++controller_diagnostics::dualsense_audio_packets_captured;
+                controller_diagnostics::last_dualsense_audio_packet_ms = controller_diagnostics::now_ms();
+                std::array<std::uint8_t, platf::dualsense_audio::bytes_per_packet> packet {};
+                std::ranges::copy(pcm, packet.begin());
+                auto lock = std::lock_guard {session->dualsense_audio.mutex};
+                constexpr std::size_t max_queued_packets = 16;
+                if (session->dualsense_audio.packets.size() >= max_queued_packets) {
+                  session->dualsense_audio.packets.pop_front();
+                  ++session->dualsense_audio.dropped_packets;
+                  ++controller_diagnostics::dualsense_audio_packets_dropped;
+                }
+                session->dualsense_audio.packets.emplace_back(std::move(packet));
+              }
+            );
+            controller_diagnostics::dualsense_audio_capture_active = false;
+            if (result != 0) ++controller_diagnostics::dualsense_audio_capture_failures;
+            BOOST_LOG(result == 0 ? info : warning) << "DualSense audio capture attempt ended with result " << result;
+            if (result == 0 || session->dualsense_audio.stop.load(std::memory_order_acquire)) break;
+            std::this_thread::sleep_for(1s);
+          }
+          session->dualsense_audio.active.store(false, std::memory_order_release);
+        }};
+      }
+#endif
       control_adaptive_triggers_t plaintext {};
       plaintext.header.type = packetTypes[IDX_SET_ADAPTIVE_TRIGGERS];
       plaintext.header.payloadLength = sizeof(plaintext) - sizeof(control_header_v2);
@@ -915,6 +992,33 @@ namespace stream {
     return 0;
   }
 
+#ifdef _WIN32
+  int send_dualsense_audio_packet(
+    session_t *session,
+    const std::array<std::uint8_t, platf::dualsense_audio::bytes_per_packet> &pcm
+  ) {
+    constexpr auto plaintext_size = sizeof(control_dualsense_audio_t) + platf::dualsense_audio::bytes_per_packet;
+    std::array<std::uint8_t, plaintext_size> plaintext_buffer {};
+    auto *plaintext = reinterpret_cast<control_dualsense_audio_t *>(plaintext_buffer.data());
+    plaintext->header.type = packetTypes[IDX_DUALSENSE_AUDIO];
+    plaintext->header.payloadLength = plaintext_size - sizeof(control_header_v2);
+    plaintext->id = 0;
+    plaintext->sequence = util::endian::little(session->dualsense_audio.sequence++);
+    plaintext->frame_count = util::endian::little(platf::dualsense_audio::frames_per_packet);
+    plaintext->channels = platf::dualsense_audio::channel_count;
+    plaintext->flags = 0x03;  // Speaker/jack and native haptic channels are present.
+    std::ranges::copy(pcm, plaintext_buffer.begin() + sizeof(*plaintext));
+
+    std::array<std::uint8_t,
+      sizeof(control_encrypted_t) + crypto::cipher::round_to_pkcs7_padded(plaintext_size) + crypto::cipher::tag_size>
+      encrypted_payload;
+    const auto payload = encode_control(session, util::view(plaintext_buffer), encrypted_payload);
+    const auto result = session->broadcast_ref->control_server.send(payload, session->control.peer, ENET_PACKET_FLAG_UNSEQUENCED);
+    if (result == 0) ++controller_diagnostics::dualsense_audio_packets_sent;
+    return result;
+  }
+#endif
+
   int send_hdr_mode(session_t *session, video::hdr_info_t hdr_info) {
     if (!session->control.peer) {
       BOOST_LOG(warning) << "Couldn't send HDR mode, still waiting for PING from Moonlight"sv;
@@ -945,6 +1049,10 @@ namespace stream {
   }
 
   void controlBroadcastThread(control_server_t *server) {
+#ifdef _WIN32
+    using dualsense_audio_packet_t =
+      std::array<std::uint8_t, platf::dualsense_audio::bytes_per_packet>;
+#endif
     server->map(packetTypes[IDX_PERIODIC_PING], [](session_t *session, const std::string_view &payload) {
       BOOST_LOG(verbose) << "type [IDX_PERIODIC_PING]"sv;
     });
@@ -1145,6 +1253,9 @@ namespace stream {
     auto broadcast_shutdown_event = mail::man->event<bool>(mail::broadcast_shutdown);
     while (!shutdown_event->peek() && !broadcast_shutdown_event->peek()) {
       bool has_session_awaiting_peer = false;
+#ifdef _WIN32
+      bool has_realtime_dualsense_audio = false;
+#endif
 
       {
         auto lg = server->_sessions.lock();
@@ -1200,6 +1311,25 @@ namespace stream {
 
               send_hdr_mode(session, std::move(hdr_info));
             }
+
+#ifdef _WIN32
+            if (session->dualsense_audio.active.load(std::memory_order_acquire)) {
+              has_realtime_dualsense_audio = true;
+              for (int packet_index = 0; packet_index < 8; ++packet_index) {
+                dualsense_audio_packet_t pcm;
+                {
+                  auto lock = std::lock_guard {session->dualsense_audio.mutex};
+                  if (session->dualsense_audio.packets.empty()) break;
+                  pcm = std::move(session->dualsense_audio.packets.front());
+                  session->dualsense_audio.packets.pop_front();
+                }
+                if (send_dualsense_audio_packet(session, pcm)) {
+                  BOOST_LOG(warning) << "Couldn't send DualSense audio packet"sv;
+                  break;
+                }
+              }
+            }
+#endif
           }
 
           ++pos;
@@ -1212,7 +1342,11 @@ namespace stream {
         break;
       }
 
+#ifdef _WIN32
+      server->iterate(has_realtime_dualsense_audio ? 2ms : 150ms);
+#else
       server->iterate(150ms);
+#endif
     }
 
     // Let all remaining connections know the server is shutting down
@@ -2003,6 +2137,10 @@ namespace stream {
         return;
       }
 
+#ifdef _WIN32
+      session.dualsense_audio.stop.store(true, std::memory_order_release);
+#endif
+
       session.shutdown_event->raise(true);
     }
 
@@ -2013,6 +2151,10 @@ namespace stream {
       if (already_stopping) {
         return;
       }
+
+#ifdef _WIN32
+      session.dualsense_audio.stop.store(true, std::memory_order_release);
+#endif
 
       // reason: graceful termination
       std::uint32_t reason = 0x80030023;
@@ -2058,6 +2200,13 @@ namespace stream {
       session.videoThread.join();
       BOOST_LOG(debug) << "Waiting for audio to end..."sv;
       session.audioThread.join();
+#ifdef _WIN32
+      if (session.dualsense_audio.thread.joinable()) {
+        BOOST_LOG(debug) << "Waiting for DualSense audio capture to end..."sv;
+        session.dualsense_audio.stop.store(true, std::memory_order_release);
+        session.dualsense_audio.thread.join();
+      }
+#endif
       BOOST_LOG(debug) << "Waiting for control to end..."sv;
       session.controlEnd.view();
       // Reset input on session stop to avoid stuck repeated keys

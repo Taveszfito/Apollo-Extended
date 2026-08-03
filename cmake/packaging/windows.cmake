@@ -29,6 +29,9 @@ install(TARGETS sunshinesvc RUNTIME DESTINATION "tools" COMPONENT application)
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/sudovda"
         DESTINATION "drivers"
         COMPONENT sudovda)
+install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/dualsense-audio"
+        DESTINATION "drivers"
+        COMPONENT gamepad)
 
 # Mandatory scripts
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/service/"
@@ -118,7 +121,7 @@ set(CPACK_COMPONENT_FIREWALL_GROUP "Scripts")
 
 # gamepad scripts
 set(CPACK_COMPONENT_GAMEPAD_DISPLAY_NAME "Virtual Gamepad Drivers")
-set(CPACK_COMPONENT_GAMEPAD_DESCRIPTION "Installs the bundled libvirtualhid DualSense driver and ViGEmBus compatibility driver.")
+set(CPACK_COMPONENT_GAMEPAD_DESCRIPTION "Installs libvirtualhid, the DualSense audio/haptics endpoint, and the ViGEmBus compatibility driver.")
 set(CPACK_COMPONENT_GAMEPAD_GROUP "Drivers")
 set(CPACK_COMPONENT_GAMEPAD_REQUIRED true)
 

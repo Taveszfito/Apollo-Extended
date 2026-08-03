@@ -31,6 +31,14 @@ namespace controller_diagnostics {
   inline std::atomic<std::uint64_t> device_closes {};
   inline std::atomic<bool> device_present {};
 
+  inline std::atomic<bool> dualsense_audio_capture_active {};
+  inline std::atomic<std::uint64_t> dualsense_audio_capture_starts {};
+  inline std::atomic<std::uint64_t> dualsense_audio_capture_failures {};
+  inline std::atomic<std::uint64_t> dualsense_audio_packets_captured {};
+  inline std::atomic<std::uint64_t> dualsense_audio_packets_sent {};
+  inline std::atomic<std::uint64_t> dualsense_audio_packets_dropped {};
+  inline std::atomic<std::int64_t> last_dualsense_audio_packet_ms {};
+
   inline std::int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now().time_since_epoch()).count();

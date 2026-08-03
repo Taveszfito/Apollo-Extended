@@ -1183,7 +1183,14 @@ namespace confighttp {
       {"output_report_age_ms", age(controller_diagnostics::last_output_report_ms.load())},
       {"device_creates", controller_diagnostics::device_creates.load()},
       {"device_closes", controller_diagnostics::device_closes.load()},
-      {"device_present", controller_diagnostics::device_present.load()}
+      {"device_present", controller_diagnostics::device_present.load()},
+      {"dualsense_audio_active", controller_diagnostics::dualsense_audio_capture_active.load()},
+      {"dualsense_audio_capture_starts", controller_diagnostics::dualsense_audio_capture_starts.load()},
+      {"dualsense_audio_capture_failures", controller_diagnostics::dualsense_audio_capture_failures.load()},
+      {"dualsense_audio_packets_captured", controller_diagnostics::dualsense_audio_packets_captured.load()},
+      {"dualsense_audio_packets_sent", controller_diagnostics::dualsense_audio_packets_sent.load()},
+      {"dualsense_audio_packets_dropped", controller_diagnostics::dualsense_audio_packets_dropped.load()},
+      {"dualsense_audio_packet_age_ms", age(controller_diagnostics::last_dualsense_audio_packet_ms.load())}
     };
     send_response(response, result);
   }
