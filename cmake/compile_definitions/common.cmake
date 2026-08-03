@@ -48,7 +48,29 @@ elseif(UNIX)
     endif()
 endif()
 
-add_subdirectory("${CMAKE_SOURCE_DIR}/third-party/libvirtualhid")
+set(LIBVIRTUALHID_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third-party/libvirtualhid")
+set(LIBVIRTUALHID_APOLLO_PATCH "${CMAKE_SOURCE_DIR}/patches/libvirtualhid-dualsense-motion.patch")
+execute_process(
+        COMMAND git apply --check --ignore-space-change --ignore-whitespace "${LIBVIRTUALHID_APOLLO_PATCH}"
+        WORKING_DIRECTORY "${LIBVIRTUALHID_SOURCE_DIR}"
+        RESULT_VARIABLE LIBVIRTUALHID_PATCH_CAN_APPLY
+        OUTPUT_QUIET ERROR_QUIET)
+if(LIBVIRTUALHID_PATCH_CAN_APPLY EQUAL 0)
+    execute_process(
+            COMMAND git apply --ignore-space-change --ignore-whitespace "${LIBVIRTUALHID_APOLLO_PATCH}"
+            WORKING_DIRECTORY "${LIBVIRTUALHID_SOURCE_DIR}"
+            COMMAND_ERROR_IS_FATAL ANY)
+else()
+    execute_process(
+            COMMAND git apply --reverse --check --ignore-space-change --ignore-whitespace "${LIBVIRTUALHID_APOLLO_PATCH}"
+            WORKING_DIRECTORY "${LIBVIRTUALHID_SOURCE_DIR}"
+            RESULT_VARIABLE LIBVIRTUALHID_PATCH_ALREADY_APPLIED
+            OUTPUT_QUIET ERROR_QUIET)
+    if(NOT LIBVIRTUALHID_PATCH_ALREADY_APPLIED EQUAL 0)
+        message(FATAL_ERROR "Apollo Extended libvirtualhid patch cannot be applied cleanly")
+    endif()
+endif()
+add_subdirectory("${LIBVIRTUALHID_SOURCE_DIR}")
 list(APPEND SUNSHINE_EXTERNAL_LIBRARIES libvirtualhid::libvirtualhid)
 list(APPEND PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/virtualhid_input.h"

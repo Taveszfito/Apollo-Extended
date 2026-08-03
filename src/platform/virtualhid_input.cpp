@@ -46,6 +46,8 @@ namespace platf::virtualhid {
     std::uint8_t last_blue = 0;  ///< Last blue LED value.
     bool has_last_player_leds = false;  ///< Whether the last player LED mask is valid.
     std::uint8_t last_player_leds = 0;  ///< Last DualSense player LED mask.
+    std::optional<lvh::Vector3> acceleration;  ///< Latest motion sample, coalesced with gyro.
+    std::optional<lvh::Vector3> gyroscope;  ///< Latest motion sample, coalesced with acceleration.
   };
 
   namespace {
@@ -654,10 +656,22 @@ namespace platf::virtualhid {
     auto &gamepad = context.gamepads[motion.id.globalIndex];
     switch (motion.motionType) {
       case LI_MOTION_TYPE_ACCEL:
-        log_failure("submit libvirtualhid gamepad acceleration"sv, gamepad->adapter->set_acceleration(lvh::Vector3 {motion.x, motion.y, motion.z}));
+        gamepad->acceleration = lvh::Vector3 {motion.x, motion.y, motion.z};
+        // Until the first gyro sample arrives, keep acceleration-only clients
+        // functional. Afterwards the following gyro event submits both sensor
+        // values in one native DualSense report.
+        if (!gamepad->gyroscope) {
+          log_failure("submit libvirtualhid gamepad acceleration"sv, gamepad->adapter->set_acceleration(gamepad->acceleration));
+        }
         break;
       case LI_MOTION_TYPE_GYRO:
-        log_failure("submit libvirtualhid gamepad gyroscope"sv, gamepad->adapter->set_gyroscope(lvh::Vector3 {motion.x, motion.y, motion.z}));
+        gamepad->gyroscope = lvh::Vector3 {motion.x, motion.y, motion.z};
+        if (gamepad->acceleration) {
+          log_failure("submit libvirtualhid gamepad motion"sv,
+                      gamepad->adapter->set_motion(*gamepad->acceleration, *gamepad->gyroscope));
+        } else {
+          log_failure("submit libvirtualhid gamepad gyroscope"sv, gamepad->adapter->set_gyroscope(gamepad->gyroscope));
+        }
         break;
       default:
         break;

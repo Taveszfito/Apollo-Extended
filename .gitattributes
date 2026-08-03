@@ -3,3 +3,4 @@ Dockerfile text eol=lf
 *.dockerfile text eol=lf
 *flatpak-lint-*.json text eol=lf
 *.sh text eol=lf
+*.patch text eol=lf whitespace=-blank-at-eol

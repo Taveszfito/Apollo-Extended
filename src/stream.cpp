@@ -1014,6 +1014,9 @@ namespace stream {
       sizeof(control_encrypted_t) + crypto::cipher::round_to_pkcs7_padded(plaintext_size) + crypto::cipher::tag_size>
       encrypted_payload;
     const auto payload = encode_control(session, util::view(plaintext_buffer), encrypted_payload);
+    // Keep this real-time stream independent of the reliable control sequence.
+    // The client has a small sequence-aware reorder window for the occasional
+    // packet that crosses another one in flight.
     const auto result = session->broadcast_ref->control_server.send(payload, session->control.peer, ENET_PACKET_FLAG_UNSEQUENCED);
     if (result == 0) ++controller_diagnostics::dualsense_audio_packets_sent;
     return result;
