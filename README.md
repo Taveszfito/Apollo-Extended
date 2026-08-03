@@ -1,4 +1,6 @@
-# Apollo Extended
+# Apollo Extended 
+
+A deployable exe release will arrive as soon as the project is stable
 
 Apollo Extended is a fork of [Apollo](https://github.com/ClassicOldSong/Apollo) that provides native PlayStation 5 controller emulation for [Artemis Android Extended](https://github.com/Taveszfito/moonlight-android). Together they form a bidirectional bridge between a Windows game and a physical DualSense connected to Android through a dedicated USB Bluetooth adapter.
 
