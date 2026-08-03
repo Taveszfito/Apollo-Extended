@@ -22,6 +22,11 @@
 #include "src/controller_diagnostics.h"
 #include "src/logging.h"
 #include "virtualhid_input.h"
+#include <libvirtualhid/report.hpp>
+
+#ifdef _WIN32
+  #include "windows/viiper_dualsense.h"
+#endif
 
 using namespace std::literals;
 
@@ -31,6 +36,9 @@ namespace platf::virtualhid {
    */
   struct gamepad_context_t {
     std::unique_ptr<lvh::GamepadStateAdapter> adapter;  ///< State adapter for the virtual gamepad.
+#ifdef _WIN32
+    std::unique_ptr<viiper_dualsense::device_t> viiper;  ///< Native USB composite DualSense backend.
+#endif
     feedback_queue_t feedback_queue;  ///< Feedback queue for client output events.
     std::array<std::optional<std::uint32_t>, 2> touch_ids;  ///< Client touch IDs assigned to libvirtualhid slots.
     std::uint8_t client_relative_index = 0;  ///< Client-relative controller index.
@@ -397,6 +405,38 @@ namespace platf::virtualhid {
       }
     }
 
+#ifdef _WIN32
+    std::uint32_t viiper_buttons(const gamepad_state_t &state) {
+      const auto flags = state.buttonFlags;
+      std::uint32_t result = 0;
+      if (flags & X) result |= 0x00000010;
+      if (flags & A) result |= 0x00000020;
+      if (flags & B) result |= 0x00000040;
+      if (flags & Y) result |= 0x00000080;
+      if (flags & LEFT_BUTTON) result |= 0x00000100;
+      if (flags & RIGHT_BUTTON) result |= 0x00000200;
+      if (state.lt != 0) result |= 0x00000400;
+      if (state.rt != 0) result |= 0x00000800;
+      if (flags & BACK) result |= 0x00001000;
+      if (flags & START) result |= 0x00002000;
+      if (flags & LEFT_STICK) result |= 0x00004000;
+      if (flags & RIGHT_STICK) result |= 0x00008000;
+      if (flags & HOME) result |= 0x00010000;
+      if (flags & TOUCHPAD_BUTTON) result |= 0x00020000;
+      if (flags & MISC_BUTTON) result |= 0x00040000;
+      return result;
+    }
+
+    std::uint8_t viiper_dpad(std::uint32_t flags) {
+      std::uint8_t result = 0;
+      if (flags & DPAD_UP) result |= 0x01;
+      if (flags & DPAD_DOWN) result |= 0x02;
+      if (flags & DPAD_LEFT) result |= 0x04;
+      if (flags & DPAD_RIGHT) result |= 0x08;
+      return result;
+    }
+#endif
+
     void cancel_all_touches(client_context_t &context) {
       if (!context.touch) {
         return;
@@ -518,9 +558,6 @@ namespace platf::virtualhid {
   }
 
   int alloc_gamepad(input_context_t &context, const gamepad_id_t &id, const gamepad_arrival_t &metadata, feedback_queue_t feedback_queue) {
-    if (!context.runtime || !context.runtime->capabilities().supports_gamepad) {
-      return -1;
-    }
     if (id.globalIndex < 0 || id.globalIndex >= static_cast<int>(context.gamepads.size())) {
       BOOST_LOG(warning) << "Invalid libvirtualhid gamepad index: "sv << id.globalIndex;
       return -1;
@@ -535,32 +572,56 @@ namespace platf::virtualhid {
       BOOST_LOG(info) << "Gamepad "sv << id.globalIndex << " will be "sv << profile.name;
     }
 
-    lvh::CreateGamepadOptions options;
-    options.profile = profile;
-    options.metadata = gamepad_metadata(id, metadata, profile);
-    auto created = lvh::GamepadStateAdapter::create(*context.runtime, options);
-    if (!created) {
-      log_failure("create libvirtualhid gamepad"sv, created.status);
-      return -1;
-    }
-
     auto gamepad = std::make_shared<gamepad_context_t>();
-    gamepad->adapter = std::move(created.adapter);
     gamepad->feedback_queue = std::move(feedback_queue);
     gamepad->client_relative_index = id.clientRelativeIndex;
     std::weak_ptr<gamepad_context_t> weak_gamepad = gamepad;
-    gamepad->adapter->set_output_callback([weak_gamepad](const lvh::GamepadOutput &output) {
-      if (const auto gamepad = weak_gamepad.lock()) {
-        handle_output(gamepad, output);
-      }
-    });
 
-    const auto &support = gamepad->adapter->support();
+#ifdef _WIN32
+    if (profile.gamepad_kind == lvh::GamepadProfileKind::dualsense && viiper_dualsense::runtime_available()) {
+      gamepad->viiper = viiper_dualsense::create([weak_gamepad, profile](std::span<const std::uint8_t> report) {
+        if (const auto gamepad = weak_gamepad.lock()) {
+          const std::vector<std::uint8_t> raw {report.begin(), report.end()};
+          for (const auto &output : lvh::reports::parse_output_reports(profile, raw)) {
+            handle_output(gamepad, output);
+          }
+        }
+      });
+      if (gamepad->viiper) {
+        BOOST_LOG(info) << "Gamepad "sv << id.globalIndex
+                        << " is using the VIIPER native USB composite DualSense backend"sv;
+      }
+    }
+#endif
+
+    if (
+#ifdef _WIN32
+      !gamepad->viiper &&
+#endif
+      true) {
+      if (!context.runtime || !context.runtime->capabilities().supports_gamepad) return -1;
+      lvh::CreateGamepadOptions options;
+      options.profile = profile;
+      options.metadata = gamepad_metadata(id, metadata, profile);
+      auto created = lvh::GamepadStateAdapter::create(*context.runtime, options);
+      if (!created) {
+        log_failure("create libvirtualhid gamepad"sv, created.status);
+        return -1;
+      }
+      gamepad->adapter = std::move(created.adapter);
+      gamepad->adapter->set_output_callback([weak_gamepad](const lvh::GamepadOutput &output) {
+        if (const auto gamepad = weak_gamepad.lock()) handle_output(gamepad, output);
+      });
+    }
+
+    const auto support = gamepad->adapter ? gamepad->adapter->support() : lvh::gamepad_profile_support(profile);
     warn_unsupported_client_features(id.globalIndex, metadata, support);
     warn_missing_client_features(id.globalIndex, metadata, support);
     if (support.supports_motion) {
-      raise_feedback(gamepad, gamepad_feedback_msg_t::make_motion_event_state(id.clientRelativeIndex, LI_MOTION_TYPE_ACCEL, 100));
-      raise_feedback(gamepad, gamepad_feedback_msg_t::make_motion_event_state(id.clientRelativeIndex, LI_MOTION_TYPE_GYRO, 100));
+      // A physical USB DualSense publishes input and sensor timestamps every
+      // 4 ms. Request the same 250 Hz cadence from capable Extended clients.
+      raise_feedback(gamepad, gamepad_feedback_msg_t::make_motion_event_state(id.clientRelativeIndex, LI_MOTION_TYPE_ACCEL, 250));
+      raise_feedback(gamepad, gamepad_feedback_msg_t::make_motion_event_state(id.clientRelativeIndex, LI_MOTION_TYPE_GYRO, 250));
     }
 
     context.gamepads[id.globalIndex] = std::move(gamepad);
@@ -570,13 +631,24 @@ namespace platf::virtualhid {
   }
 
   bool has_gamepad(const input_context_t &context, int nr) {
-    return nr >= 0 && nr < context.gamepads.size() && context.gamepads[nr] && context.gamepads[nr]->adapter;
+    if (nr < 0 || nr >= context.gamepads.size() || !context.gamepads[nr]) return false;
+    if (context.gamepads[nr]->adapter) return true;
+#ifdef _WIN32
+    return context.gamepads[nr]->viiper != nullptr;
+#else
+    return false;
+#endif
   }
 
   void free_gamepad(input_context_t &context, int nr) {
     if (has_gamepad(context, nr)) {
-      context.gamepads[nr]->adapter->set_output_callback({});
-      log_failure("close libvirtualhid gamepad"sv, context.gamepads[nr]->adapter->close());
+      if (context.gamepads[nr]->adapter) {
+        context.gamepads[nr]->adapter->set_output_callback({});
+        log_failure("close libvirtualhid gamepad"sv, context.gamepads[nr]->adapter->close());
+      }
+#ifdef _WIN32
+      context.gamepads[nr]->viiper.reset();
+#endif
       context.gamepads[nr].reset();
       controller_diagnostics::device_present = false;
       ++controller_diagnostics::device_closes;
@@ -589,6 +661,16 @@ namespace platf::virtualhid {
     }
 
     auto &gamepad = context.gamepads[nr];
+#ifdef _WIN32
+    if (gamepad->viiper) {
+      const auto success = gamepad->viiper->set_gamepad(
+        state.lsX, state.lsY, state.rsX, state.rsY,
+        viiper_buttons(state), viiper_dpad(state.buttonFlags), state.lt, state.rt
+      );
+      controller_diagnostics::record_state_submit(success);
+      return;
+    }
+#endif
     const auto status = gamepad->adapter->set_state(make_gamepad_state(state, gamepad->adapter->support()));
     controller_diagnostics::record_state_submit(status.ok());
     log_failure("submit libvirtualhid gamepad state"sv, status);
@@ -600,13 +682,18 @@ namespace platf::virtualhid {
     }
 
     auto &gamepad = context.gamepads[touch.id.globalIndex];
-    if (!gamepad->adapter->support().supports_touchpad) {
+    if (gamepad->adapter && !gamepad->adapter->support().supports_touchpad) {
       return;
     }
 
     if (touch.eventType == LI_TOUCH_EVENT_CANCEL_ALL) {
       for (std::size_t index = 0; index < gamepad->touch_ids.size(); ++index) {
         if (gamepad->touch_ids[index].has_value()) {
+#ifdef _WIN32
+          if (gamepad->viiper) {
+            gamepad->viiper->set_touch(index, false, 0, 0, static_cast<std::uint8_t>(index));
+          } else
+#endif
           log_failure("release libvirtualhid gamepad touch"sv, gamepad->adapter->clear_touchpad_contact(index));
           gamepad->touch_ids[index].reset();
         }
@@ -632,6 +719,13 @@ namespace platf::virtualhid {
 
     const auto index = static_cast<std::size_t>(std::distance(gamepad->touch_ids.begin(), slot));
     if (touch.eventType == LI_TOUCH_EVENT_UP || touch.eventType == LI_TOUCH_EVENT_CANCEL) {
+#ifdef _WIN32
+      if (gamepad->viiper) {
+        gamepad->viiper->set_touch(index, false, 0, 0, static_cast<std::uint8_t>(index));
+        slot->reset();
+        return;
+      }
+#endif
       log_failure("release libvirtualhid gamepad touch"sv, gamepad->adapter->clear_touchpad_contact(index));
       slot->reset();
       return;
@@ -645,6 +739,17 @@ namespace platf::virtualhid {
     contact.active = touch.pressure > 0.5F;
     contact.x = std::clamp(touch.x, 0.0F, 1.0F);
     contact.y = std::clamp(touch.y, 0.0F, 1.0F);
+#ifdef _WIN32
+    if (gamepad->viiper) {
+      gamepad->viiper->set_touch(
+        index, contact.active,
+        static_cast<std::uint16_t>(std::lround(contact.x * 1920.0F)),
+        static_cast<std::uint16_t>(std::lround(contact.y * 1080.0F)),
+        static_cast<std::uint8_t>(index)
+      );
+      return;
+    }
+#endif
     log_failure("submit libvirtualhid gamepad touch"sv, gamepad->adapter->set_touchpad_contact(index, contact));
   }
 
@@ -654,6 +759,16 @@ namespace platf::virtualhid {
     }
 
     auto &gamepad = context.gamepads[motion.id.globalIndex];
+#ifdef _WIN32
+    if (gamepad->viiper) {
+      if (motion.motionType == LI_MOTION_TYPE_ACCEL || motion.motionType == LI_MOTION_TYPE_GYRO) {
+        gamepad->viiper->set_motion(
+          motion.motionType == LI_MOTION_TYPE_GYRO, motion.x, motion.y, motion.z
+        );
+      }
+      return;
+    }
+#endif
     switch (motion.motionType) {
       case LI_MOTION_TYPE_ACCEL:
         gamepad->acceleration = lvh::Vector3 {motion.x, motion.y, motion.z};
@@ -684,6 +799,11 @@ namespace platf::virtualhid {
     }
 
     auto &gamepad = context.gamepads[battery.id.globalIndex];
+#ifdef _WIN32
+    // VIIPER exposes battery metadata from its USB device profile. Dynamic
+    // battery updates will be added to the V5 contract later.
+    if (gamepad->viiper) return;
+#endif
     if (battery.state == LI_BATTERY_STATE_UNKNOWN || battery.state == LI_BATTERY_STATE_NOT_PRESENT) {
       log_failure("clear libvirtualhid gamepad battery"sv, gamepad->adapter->clear_battery());
       return;

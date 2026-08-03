@@ -199,7 +199,7 @@ ProviderName = "Apollo Extended"
 MfgName      = "Apollo Extended"
 MsCopyRight  = "Apollo Extended contributors"
 
-VIRTUALAUDIODRIVER_SA.DeviceDesc="Apollo Extended DualSense Audio"
+VIRTUALAUDIODRIVER_SA.DeviceDesc="DualSense Wireless Controller"
 VirtualAudioDriver.SvcDesc="Apollo Extended DualSense Audio"
 
 ;; friendly names

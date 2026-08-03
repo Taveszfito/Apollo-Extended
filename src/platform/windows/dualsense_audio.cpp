@@ -26,6 +26,9 @@ using namespace std::literals;
 namespace platf::dualsense_audio {
   namespace {
     std::atomic_uint64_t capture_restart_generation {};
+    constexpr GUID apollo_dualsense_container_id {
+      0xd5e054c0, 0x0ce6, 0x4c00, {0xae, 0x50, 0x41, 0x50, 0x4f, 0x4c, 0x4c, 0x4f}
+    };
 
     template<class T>
     class com_ptr_t {
@@ -68,12 +71,22 @@ namespace platf::dualsense_audio {
       com_ptr_t<IPropertyStore> properties;
       if (FAILED(device->OpenPropertyStore(STGM_READ, properties.put()))) return false;
 
+      PROPVARIANT container_id;
+      PropVariantInit(&container_id);
+      const auto container_status = properties->GetValue(PKEY_Device_ContainerId, &container_id);
+      const auto container_matches = SUCCEEDED(container_status) && container_id.vt == VT_CLSID &&
+                                     container_id.puuid != nullptr &&
+                                     IsEqualGUID(*container_id.puuid, apollo_dualsense_container_id);
+      PropVariantClear(&container_id);
+      if (container_matches) return true;
+
       PROPVARIANT friendly_name;
       PropVariantInit(&friendly_name);
       const auto status = properties->GetValue(PKEY_Device_FriendlyName, &friendly_name);
       const auto matches = SUCCEEDED(status) && friendly_name.vt == VT_LPWSTR &&
                            friendly_name.pwszVal != nullptr &&
-                           contains_case_insensitive(friendly_name.pwszVal, L"Apollo Extended DualSense Audio");
+                           (contains_case_insensitive(friendly_name.pwszVal, L"Apollo Extended DualSense Audio") ||
+                            contains_case_insensitive(friendly_name.pwszVal, L"DualSense Wireless Controller"));
       PropVariantClear(&friendly_name);
       return matches;
     }

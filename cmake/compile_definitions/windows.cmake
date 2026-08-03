@@ -62,6 +62,8 @@ set(PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/windows/dualsense_audio.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/dualsense_audio.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/dualsense_audio_test.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/viiper_dualsense.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/viiper_dualsense.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/virtual_display.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/virtual_display.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/utils.h"

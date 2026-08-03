@@ -21,28 +21,15 @@ else {
 $audioDriverDirectory = Join-Path $scriptPath "..\drivers\dualsense-audio"
 $audioDriverDirectory = [IO.Path]::GetFullPath($audioDriverDirectory)
 $audioInf = Join-Path $audioDriverDirectory "VirtualAudioDriver.inf"
-$devcon = Join-Path $audioDriverDirectory "devcon.exe"
-if (!(Test-Path -LiteralPath $audioInf) -or !(Test-Path -LiteralPath $devcon)) {
+$audioDeviceInstaller = Join-Path $scriptPath "install-dualsense-audio-device.ps1"
+if (!(Test-Path -LiteralPath $audioInf) -or !(Test-Path -LiteralPath $audioDeviceInstaller)) {
     throw "The bundled DualSense audio driver package is missing."
 }
 
-$audioDevices = Get-PnpDevice -FriendlyName "Apollo Extended DualSense Audio" `
-    -ErrorAction SilentlyContinue | Where-Object {
-    $hardwareIds = (Get-PnpDeviceProperty -InstanceId $_.InstanceId `
-        -KeyName "DEVPKEY_Device_HardwareIds" -ErrorAction SilentlyContinue).Data
-    $hardwareIds -contains "ROOT\ApolloExtendedDualSenseAudio"
-}
-$devconOperation = if ($audioDevices) { "update" } else { "install" }
-$audioInstall = Start-Process `
-    -FilePath $devcon `
-    -ArgumentList $devconOperation, "`"$audioInf`"", "ROOT\ApolloExtendedDualSenseAudio" `
-    -Wait -PassThru -NoNewWindow
-if ($audioInstall.ExitCode -notin @(0, 1)) {
-    throw "DualSense audio driver installation failed with exit code $($audioInstall.ExitCode)."
-}
+& $audioDeviceInstaller -InfPath $audioInf
 
 $audioDevice = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object {
-    $_.InstanceId -like "ROOT\MEDIA\*" -and $_.FriendlyName -eq "Apollo Extended DualSense Audio"
+    $_.InstanceId -eq "SWD\APOLLOEXTENDED\DUALSENSEAUDIO"
 } | Select-Object -First 1
 if ($audioDevice -and $audioDevice.Problem -eq 52) {
     Write-Warning "The DualSense audio driver is test-signed. Secure Boot blocks test drivers; use a production-signed package or disable Secure Boot and enable Windows test-signing mode for development."

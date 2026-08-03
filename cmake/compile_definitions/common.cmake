@@ -50,26 +50,23 @@ endif()
 
 set(LIBVIRTUALHID_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third-party/libvirtualhid")
 set(LIBVIRTUALHID_APOLLO_PATCH "${CMAKE_SOURCE_DIR}/patches/libvirtualhid-dualsense-motion.patch")
-execute_process(
-        COMMAND git apply --check --ignore-space-change --ignore-whitespace "${LIBVIRTUALHID_APOLLO_PATCH}"
-        WORKING_DIRECTORY "${LIBVIRTUALHID_SOURCE_DIR}"
-        RESULT_VARIABLE LIBVIRTUALHID_PATCH_CAN_APPLY
-        OUTPUT_QUIET ERROR_QUIET)
-if(LIBVIRTUALHID_PATCH_CAN_APPLY EQUAL 0)
+file(READ "${LIBVIRTUALHID_SOURCE_DIR}/src/core/report.cpp" LIBVIRTUALHID_REPORT_SOURCE)
+string(FIND "${LIBVIRTUALHID_REPORT_SOURCE}" "dualsense_sensor_timestamp" LIBVIRTUALHID_APOLLO_PATCH_MARKER)
+if(LIBVIRTUALHID_APOLLO_PATCH_MARKER EQUAL -1)
+    execute_process(
+            COMMAND git apply --check --ignore-space-change --ignore-whitespace "${LIBVIRTUALHID_APOLLO_PATCH}"
+            WORKING_DIRECTORY "${LIBVIRTUALHID_SOURCE_DIR}"
+            RESULT_VARIABLE LIBVIRTUALHID_PATCH_CAN_APPLY
+            OUTPUT_QUIET ERROR_QUIET)
+    if(NOT LIBVIRTUALHID_PATCH_CAN_APPLY EQUAL 0)
+        message(FATAL_ERROR "Apollo Extended libvirtualhid patch cannot be applied cleanly")
+    endif()
     execute_process(
             COMMAND git apply --ignore-space-change --ignore-whitespace "${LIBVIRTUALHID_APOLLO_PATCH}"
             WORKING_DIRECTORY "${LIBVIRTUALHID_SOURCE_DIR}"
             COMMAND_ERROR_IS_FATAL ANY)
-else()
-    execute_process(
-            COMMAND git apply --reverse --check --ignore-space-change --ignore-whitespace "${LIBVIRTUALHID_APOLLO_PATCH}"
-            WORKING_DIRECTORY "${LIBVIRTUALHID_SOURCE_DIR}"
-            RESULT_VARIABLE LIBVIRTUALHID_PATCH_ALREADY_APPLIED
-            OUTPUT_QUIET ERROR_QUIET)
-    if(NOT LIBVIRTUALHID_PATCH_ALREADY_APPLIED EQUAL 0)
-        message(FATAL_ERROR "Apollo Extended libvirtualhid patch cannot be applied cleanly")
-    endif()
 endif()
+unset(LIBVIRTUALHID_REPORT_SOURCE)
 add_subdirectory("${LIBVIRTUALHID_SOURCE_DIR}")
 list(APPEND SUNSHINE_EXTERNAL_LIBRARIES libvirtualhid::libvirtualhid)
 list(APPEND PLATFORM_TARGET_FILES

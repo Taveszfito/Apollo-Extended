@@ -68,4 +68,4 @@
 	branch = master
 [submodule "third-party/libvirtualhid"]
 	path = third-party/libvirtualhid
-	url = https://github.com/LizardByte/libvirtualhid.git
+	url = https://github.com/Taveszfito/libvirtualhid.git
