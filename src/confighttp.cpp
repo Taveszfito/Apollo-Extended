@@ -42,6 +42,7 @@
 #include "uuid.h"
 
 #ifdef _WIN32
+  #include "platform/windows/dualsense_audio.h"
   #include "platform/windows/utils.h"
 #endif
 
@@ -1192,7 +1193,56 @@ namespace confighttp {
       {"dualsense_audio_packets_dropped", controller_diagnostics::dualsense_audio_packets_dropped.load()},
       {"dualsense_audio_packet_age_ms", age(controller_diagnostics::last_dualsense_audio_packet_ms.load())}
     };
+#ifdef _WIN32
+    const auto endpoint = platf::dualsense_audio::endpoint_info();
+    result["dualsense_audio_endpoint_present"] = endpoint.present;
+    result["dualsense_audio_endpoint_quad"] = endpoint.quadraphonic;
+    result["dualsense_audio_endpoint_id"] = endpoint.id;
+    result["dualsense_audio_endpoint_name"] = endpoint.name;
+    result["dualsense_audio_mirror_active"] = platf::dualsense_audio::system_audio_mirror_active();
+    result["dualsense_audio_mirror_result"] = platf::dualsense_audio::system_audio_mirror_result();
+#else
+    result["dualsense_audio_endpoint_present"] = false;
+    result["dualsense_audio_endpoint_quad"] = false;
+    result["dualsense_audio_mirror_active"] = false;
+    result["dualsense_audio_mirror_result"] = -100;
+#endif
     send_response(response, result);
+  }
+
+  void controlDualSenseAudio(resp_https_t response, req_https_t request) {
+    if (!validateContentType(response, request, "application/json") || !authenticate(response, request)) {
+      return;
+    }
+
+    print_req(request);
+    std::stringstream content;
+    content << request->content.rdbuf();
+    try {
+      const auto input = nlohmann::json::parse(content);
+      const auto action = input.value("action", "");
+      int result = -100;
+#ifdef _WIN32
+      if (action == "tone") {
+        const auto channel = input.value("channel", -2);
+        const auto duration_ms = input.value("duration_ms", 1200U);
+        result = platf::dualsense_audio::play_test_tone(channel, duration_ms);
+      } else if (action == "mirror") {
+        result = platf::dualsense_audio::set_system_audio_mirror(input.value("enabled", false));
+      } else if (action == "reset") {
+        result = platf::dualsense_audio::restart_endpoint();
+      } else {
+        bad_request(response, request, "Unknown DualSense audio action");
+        return;
+      }
+#else
+      (void) action;
+#endif
+      send_response(response, {{"status", result == 0}, {"result", result}});
+    } catch (const std::exception &error) {
+      BOOST_LOG(warning) << "DualSenseAudioControl: " << error.what();
+      bad_request(response, request, error.what());
+    }
   }
 
   /**
@@ -1582,6 +1632,7 @@ namespace confighttp {
     server.resource["^/api/apps/close$"]["POST"] = closeApp;
     server.resource["^/api/logs$"]["GET"] = getLogs;
     server.resource["^/api/controller-diagnostics$"]["GET"] = getControllerDiagnostics;
+    server.resource["^/api/controller-diagnostics/dualsense-audio$"]["POST"] = controlDualSenseAudio;
     server.resource["^/api/config$"]["GET"] = getConfig;
     server.resource["^/api/config$"]["POST"] = saveConfig;
     server.resource["^/api/configLocale$"]["GET"] = getLocale;

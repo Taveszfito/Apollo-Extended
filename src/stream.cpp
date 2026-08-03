@@ -952,8 +952,9 @@ namespace stream {
               }
             );
             controller_diagnostics::dualsense_audio_capture_active = false;
-            if (result != 0) ++controller_diagnostics::dualsense_audio_capture_failures;
-            BOOST_LOG(result == 0 ? info : warning) << "DualSense audio capture attempt ended with result " << result;
+            if (result != 0 && result != 1) ++controller_diagnostics::dualsense_audio_capture_failures;
+            BOOST_LOG(result == 0 || result == 1 ? info : warning)
+              << "DualSense audio capture attempt ended with result " << result;
             if (result == 0 || session->dualsense_audio.stop.load(std::memory_order_acquire)) break;
             std::this_thread::sleep_for(1s);
           }

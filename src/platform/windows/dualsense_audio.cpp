@@ -25,6 +25,8 @@ using namespace std::literals;
 
 namespace platf::dualsense_audio {
   namespace {
+    std::atomic_uint64_t capture_restart_generation {};
+
     template<class T>
     class com_ptr_t {
     public:
@@ -94,6 +96,7 @@ namespace platf::dualsense_audio {
   }  // namespace
 
   int capture(std::atomic_bool &stop, const packet_callback_t &callback) {
+    const auto restart_generation = capture_restart_generation.load(std::memory_order_acquire);
     BOOST_LOG(info) << "DualSense audio WASAPI step: initialize COM";
     const auto com_status = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     const auto uninitialize_com = SUCCEEDED(com_status);
@@ -191,6 +194,10 @@ namespace platf::dualsense_audio {
     pending.reserve(bytes_per_packet * 3);
     int capture_result = 0;
     while (!stop.load(std::memory_order_acquire)) {
+      if (capture_restart_generation.load(std::memory_order_acquire) != restart_generation) {
+        capture_result = 1;
+        break;
+      }
       const auto wait_status = WaitForSingleObject(event.value, 50);
       if (wait_status == WAIT_TIMEOUT) continue;
       if (wait_status != WAIT_OBJECT_0) break;
@@ -230,5 +237,9 @@ namespace platf::dualsense_audio {
     if (uninitialize_com) CoUninitialize();
     BOOST_LOG(info) << "DualSense audio capture stopped";
     return capture_result;
+  }
+
+  void request_capture_restart() {
+    capture_restart_generation.fetch_add(1, std::memory_order_acq_rel);
   }
 }  // namespace platf::dualsense_audio
