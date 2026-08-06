@@ -151,6 +151,10 @@ namespace platf::viiper_dualsense {
     class device_impl_t final: public device_t {
     public:
       explicit device_impl_t(output_callback_t callback): callback_ {std::move(callback)} {
+        // Both touch contacts must start released. A zero-initialized contact
+        // byte means an active finger with tracking ID 0 in Sony's format.
+        state_[15] = 0x80;
+        state_[20] = 0x80;
         put_u16(state_.data() + 31, static_cast<std::uint16_t>(-8192));
       }
 
@@ -239,7 +243,12 @@ namespace platf::viiper_dualsense {
           const auto offset = slot == 0 ? 11U : 16U;
           put_u16(state_.data() + offset, x);
           put_u16(state_.data() + offset + 2U, y);
-          state_[offset + 4U] = active ? static_cast<std::uint8_t>(0x80U | (tracking_id & 0x7FU)) : 0;
+          // DualSense uses bit 7 as the *inactive* flag. The previous encoding
+          // set it for active contacts, which made an idle pad appear touched
+          // at (0, 0) and hid the contact as soon as a finger was placed.
+          state_[offset + 4U] = active ?
+            static_cast<std::uint8_t>(tracking_id & 0x7FU) :
+            static_cast<std::uint8_t>(0x80U | (tracking_id & 0x7FU));
         }
         return submit_state();
       }
