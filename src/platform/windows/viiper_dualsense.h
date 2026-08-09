@@ -27,4 +27,6 @@ namespace platf::viiper_dualsense {
 
   std::unique_ptr<device_t> create(output_callback_t callback);
   bool runtime_available();
+  /** Remove abandoned localhost VIIPER DualSense imports from usbip-win2. */
+  void cleanup_orphaned_devices();
 }  // namespace platf::viiper_dualsense

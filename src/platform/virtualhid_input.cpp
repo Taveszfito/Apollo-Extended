@@ -452,6 +452,12 @@ namespace platf::virtualhid {
 
   input_context_t::input_context_t():
       runtime {create_runtime()} {
+#ifdef _WIN32
+    // VIIPER can lose its bus bookkeeping while usbip-win2 still retains the
+    // imported USB composite device. No client exists while this global input
+    // context is being constructed, so every such import is necessarily stale.
+    viiper_dualsense::cleanup_orphaned_devices();
+#endif
     if (!runtime) {
       BOOST_LOG(warning) << "Unable to create libvirtualhid runtime"sv;
       return;
@@ -652,6 +658,13 @@ namespace platf::virtualhid {
       context.gamepads[nr].reset();
       controller_diagnostics::device_present = false;
       ++controller_diagnostics::device_closes;
+#ifdef _WIN32
+      if (std::ranges::none_of(context.gamepads, [](const auto &slot) { return slot != nullptr; })) {
+        // Enforce the lifecycle invariant even when VIIPER failed to remove its
+        // low-level USB import during normal device destruction.
+        viiper_dualsense::cleanup_orphaned_devices();
+      }
+#endif
     }
   }
 

@@ -15,6 +15,7 @@
 *.so
 *.dylib
 *.dll
+!src_assets/windows/drivers/sudovda/SudoVDA.dll
 
 # Fortran module files
 *.mod
@@ -28,6 +29,7 @@
 
 # Executables
 *.exe
+!src_assets/windows/drivers/sudovda/nefconc.exe
 *.out
 *.app
 

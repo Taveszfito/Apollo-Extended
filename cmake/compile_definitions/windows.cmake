@@ -84,6 +84,7 @@ set(OPENSSL_LIBRARIES
 list(PREPEND PLATFORM_LIBRARIES
         ${CURL_STATIC_LIBRARIES}
         avrt
+        cfgmgr32
         d3d11
         D3DCompiler
         dwmapi

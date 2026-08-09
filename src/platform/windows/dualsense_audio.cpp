@@ -15,6 +15,7 @@
 
 #include <audioclient.h>
 #include <avrt.h>
+#include <cfgmgr32.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <mmdeviceapi.h>
 #include <windows.h>
@@ -26,10 +27,6 @@ using namespace std::literals;
 namespace platf::dualsense_audio {
   namespace {
     std::atomic_uint64_t capture_restart_generation {};
-    constexpr GUID apollo_dualsense_container_id {
-      0xd5e054c0, 0x0ce6, 0x4c00, {0xae, 0x50, 0x41, 0x50, 0x4f, 0x4c, 0x4c, 0x4f}
-    };
-
     template<class T>
     class com_ptr_t {
     public:
@@ -67,28 +64,36 @@ namespace platf::dualsense_audio {
              ) != text.end();
     }
 
-    bool is_apollo_dualsense_endpoint(IMMDevice *device) {
+    std::wstring parent_instance_id(IMMDevice *device) {
+      LPWSTR endpoint_id = nullptr;
+      if (FAILED(device->GetId(&endpoint_id)) || !endpoint_id) return {};
+      std::wstring instance_id = L"SWD\\MMDEVAPI\\";
+      instance_id += endpoint_id;
+      CoTaskMemFree(endpoint_id);
+
+      DEVINST endpoint_node = 0;
+      if (CM_Locate_DevNodeW(&endpoint_node, instance_id.data(), CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS) return {};
+      DEVINST parent_node = 0;
+      if (CM_Get_Parent(&parent_node, endpoint_node, 0) != CR_SUCCESS) return {};
+      std::array<wchar_t, MAX_DEVICE_ID_LEN> parent_id {};
+      if (CM_Get_Device_IDW(parent_node, parent_id.data(), static_cast<ULONG>(parent_id.size()), 0) != CR_SUCCESS) return {};
+      return parent_id.data();
+    }
+
+    bool is_viiper_dualsense_endpoint(IMMDevice *device) {
       com_ptr_t<IPropertyStore> properties;
       if (FAILED(device->OpenPropertyStore(STGM_READ, properties.put()))) return false;
-
-      PROPVARIANT container_id;
-      PropVariantInit(&container_id);
-      const auto container_status = properties->GetValue(PKEY_Device_ContainerId, &container_id);
-      const auto container_matches = SUCCEEDED(container_status) && container_id.vt == VT_CLSID &&
-                                     container_id.puuid != nullptr &&
-                                     IsEqualGUID(*container_id.puuid, apollo_dualsense_container_id);
-      PropVariantClear(&container_id);
-      if (container_matches) return true;
-
       PROPVARIANT friendly_name;
       PropVariantInit(&friendly_name);
       const auto status = properties->GetValue(PKEY_Device_FriendlyName, &friendly_name);
-      const auto matches = SUCCEEDED(status) && friendly_name.vt == VT_LPWSTR &&
-                           friendly_name.pwszVal != nullptr &&
-                           (contains_case_insensitive(friendly_name.pwszVal, L"Apollo Extended DualSense Audio") ||
-                            contains_case_insensitive(friendly_name.pwszVal, L"DualSense Wireless Controller"));
+      const auto named_dualsense = SUCCEEDED(status) && friendly_name.vt == VT_LPWSTR &&
+                                   friendly_name.pwszVal != nullptr &&
+                                   contains_case_insensitive(friendly_name.pwszVal, L"DualSense Wireless Controller");
       PropVariantClear(&friendly_name);
-      return matches;
+      if (!named_dualsense) return false;
+
+      const auto parent = parent_instance_id(device);
+      return contains_case_insensitive(parent, L"USB\\VID_054C&PID_0CE6&MI_00");
     }
 
     IMMDevice *find_endpoint(IMMDeviceEnumerator *enumerator) {
@@ -100,7 +105,7 @@ namespace platf::dualsense_audio {
       for (UINT index = 0; index < count; ++index) {
         IMMDevice *candidate = nullptr;
         if (SUCCEEDED(endpoints->Item(index, &candidate)) && candidate != nullptr) {
-          if (is_apollo_dualsense_endpoint(candidate)) return candidate;
+          if (is_viiper_dualsense_endpoint(candidate)) return candidate;
           candidate->Release();
         }
       }

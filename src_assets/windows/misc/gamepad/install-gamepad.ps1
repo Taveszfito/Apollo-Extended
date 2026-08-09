@@ -35,6 +35,13 @@ function Get-DualSenseAudioDevice {
     }
     return $null
 }
+function Get-SudoVdaDevice {
+    $signed = Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue |
+        Where-Object { $_.DriverProviderName -eq 'SudoMaker' -and $_.InfName -match '(?i)^oem\d+\.inf$' -and $_.DeviceName -eq 'SudoMaker Virtual Display Adapter' } |
+        Select-Object -First 1
+    if ($signed.DeviceID) { return Get-PnpDevice -InstanceId $signed.DeviceID -ErrorAction SilentlyContinue }
+    return $null
+}
 
 function Get-UsbipVersion {
     $programFiles64 = if (${env:ProgramW6432}) { ${env:ProgramW6432} } else { ${env:ProgramFiles} }
@@ -197,12 +204,17 @@ catch {
 
 try {
     Write-Host "[6/6] Checking SudoVDA..."
-    $sudovdaHealthy = [bool](Get-PnpDevice -InstanceId 'ROOT\SUDOMAKER\SUDOVDA' -ErrorAction SilentlyContinue)
+    $sudovdaDevice = Get-SudoVdaDevice
+    $sudovdaHealthy = $sudovdaDevice -and $sudovdaDevice.Status -eq 'OK' -and ($null -eq $sudovdaDevice.Problem -or [int]$sudovdaDevice.Problem -eq 0)
     if ((Test-Selected "sudovda") -or !$sudovdaHealthy) {
-        $sudovdaInstaller = Join-Path $installRoot "drivers\sudovda\install.bat"
-        if (!(Test-Path -LiteralPath $sudovdaInstaller)) { throw "The bundled SudoVDA installer is missing." }
-        $sudovda = Start-Process -FilePath $sudovdaInstaller -Wait -PassThru
-        if ($sudovda.ExitCode -ne 0) { throw "installer exited with code $($sudovda.ExitCode)." }
+        $sudovdaInstaller = Join-Path $scriptPath "install-sudovda-device.ps1"
+        $sudovdaDriverRoot = Join-Path $installRoot "drivers\sudovda"
+        if (!(Test-Path -LiteralPath $sudovdaInstaller)) { throw "The bundled SudoVDA repair script is missing." }
+        & $sudovdaInstaller -DriverDirectory $sudovdaDriverRoot -Force:(Test-Selected "sudovda")
+        $sudovdaDevice = Get-SudoVdaDevice
+        if (!$sudovdaDevice -or $sudovdaDevice.Status -ne 'OK' -or ($null -ne $sudovdaDevice.Problem -and [int]$sudovdaDevice.Problem -ne 0)) {
+            throw "repair completed without a healthy display device."
+        }
         $actions.Add("SudoVDA refreshed")
     }
 }

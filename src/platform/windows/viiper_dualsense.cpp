@@ -14,8 +14,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <regex>
+#include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -99,6 +102,25 @@ namespace platf::viiper_dualsense {
       }
       closesocket(socket_handle);
       return response;
+    }
+
+    std::string usbip_path() {
+      std::array<char, MAX_PATH> program_files {};
+      const auto length = GetEnvironmentVariableA("ProgramW6432", program_files.data(),
+                                                  static_cast<DWORD>(program_files.size()));
+      const std::string root = length > 0 && length < program_files.size() ?
+        std::string {program_files.data(), length} : "C:\\Program Files";
+      return root + "\\USBip\\usbip.exe";
+    }
+
+    std::string run_command(const std::string &command) {
+      std::string output;
+      if (auto *pipe = _popen(command.c_str(), "r")) {
+        std::array<char, 1024> buffer {};
+        while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe)) output += buffer.data();
+        _pclose(pipe);
+      }
+      return output;
     }
 
     std::uint32_t crc32(const std::uint8_t *data, std::size_t size, std::uint32_t crc = 0) {
@@ -362,5 +384,42 @@ namespace platf::viiper_dualsense {
 
   bool runtime_available() {
     return request("ping").find("VIIPER") != std::string::npos;
+  }
+
+  void cleanup_orphaned_devices() {
+    const auto executable = usbip_path();
+    const auto listing = run_command('"' + executable + "\" port 2>&1");
+    const std::regex port_header {R"(^Port\s+([0-9]+):)"};
+    std::set<std::string> orphaned_ports;
+    std::istringstream lines {listing};
+    std::string line;
+    std::string current_port;
+    bool dualsense = false;
+    bool local_viiper = false;
+    const auto finish_entry = [&] {
+      if (!current_port.empty() && dualsense && local_viiper) orphaned_ports.insert(current_port);
+    };
+    while (std::getline(lines, line)) {
+      std::smatch match;
+      if (std::regex_search(line, match, port_header)) {
+        finish_entry();
+        current_port = match[1].str();
+        dualsense = false;
+        local_viiper = false;
+      } else if (!current_port.empty()) {
+        dualsense = dualsense || line.find("(054c:0ce6)") != std::string::npos;
+        local_viiper = local_viiper || line.find("usbip://localhost:3241/") != std::string::npos;
+      }
+    }
+    finish_entry();
+
+    for (const auto &port : orphaned_ports) {
+      BOOST_LOG(warning) << "Removing orphaned VIIPER DualSense from usbip port " << port;
+      const auto result = std::system(('"' + executable + "\" detach -p " + port + " >nul 2>&1").c_str());
+      if (result != 0) {
+        BOOST_LOG(warning) << "Could not detach orphaned VIIPER DualSense from usbip port " << port
+                           << " (exit " << result << ')';
+      }
+    }
   }
 }  // namespace platf::viiper_dualsense

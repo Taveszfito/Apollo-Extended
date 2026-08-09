@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cwctype>
 #include <stop_token>
@@ -16,6 +17,7 @@
 
 #include <audioclient.h>
 #include <avrt.h>
+#include <cfgmgr32.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <mmdeviceapi.h>
 #include <windows.h>
@@ -75,6 +77,21 @@ namespace platf::dualsense_audio {
       return result;
     }
 
+    std::wstring parent_instance_id(IMMDevice *device) {
+      LPWSTR endpoint_id = nullptr;
+      if (FAILED(device->GetId(&endpoint_id)) || !endpoint_id) return {};
+      std::wstring instance_id = L"SWD\\MMDEVAPI\\";
+      instance_id += endpoint_id;
+      CoTaskMemFree(endpoint_id);
+      DEVINST endpoint_node = 0;
+      if (CM_Locate_DevNodeW(&endpoint_node, instance_id.data(), CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS) return {};
+      DEVINST parent_node = 0;
+      if (CM_Get_Parent(&parent_node, endpoint_node, 0) != CR_SUCCESS) return {};
+      std::array<wchar_t, MAX_DEVICE_ID_LEN> parent_id {};
+      if (CM_Get_Device_IDW(parent_node, parent_id.data(), static_cast<ULONG>(parent_id.size()), 0) != CR_SUCCESS) return {};
+      return parent_id.data();
+    }
+
     bool is_target(IMMDevice *device, std::wstring *friendly_name = nullptr) {
       com_ptr_t<IPropertyStore> properties;
       if (FAILED(device->OpenPropertyStore(STGM_READ, properties.put()))) return false;
@@ -91,10 +108,9 @@ namespace platf::dualsense_audio {
                                      IsEqualGUID(*container_id.puuid, apollo_dualsense_container_id);
       PropVariantClear(&container_id);
 
-      const auto name_matches = has_name &&
-                                (contains_case_insensitive(name.pwszVal, L"Apollo Extended DualSense Audio") ||
-                                 contains_case_insensitive(name.pwszVal, L"DualSense Wireless Controller"));
-      const auto matches = container_matches || name_matches;
+      const auto root_audio = contains_case_insensitive(parent_instance_id(device), L"ROOT\\MEDIA");
+      const auto name_matches = has_name && contains_case_insensitive(name.pwszVal, L"Apollo Extended DualSense Audio");
+      const auto matches = container_matches || name_matches || root_audio;
       if (matches && friendly_name && has_name) *friendly_name = name.pwszVal;
       PropVariantClear(&name);
       return matches;
@@ -113,6 +129,41 @@ namespace platf::dualsense_audio {
         }
       }
       return nullptr;
+    }
+
+    IMMDevice *find_mirror_source(IMMDeviceEnumerator *enumerator) {
+      // A newly created controller endpoint can temporarily become Windows'
+      // default render device. Never loop it back into itself. Prefer the
+      // normal defaults, then fall back to any active non-controller output.
+      for (const auto role : {eConsole, eMultimedia, eCommunications}) {
+        IMMDevice *device = nullptr;
+        if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eRender, role, &device)) && device) {
+          if (!is_target(device)) return device;
+          device->Release();
+        }
+      }
+
+      com_ptr_t<IMMDeviceCollection> devices;
+      if (FAILED(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, devices.put()))) return nullptr;
+      UINT count = 0;
+      devices->GetCount(&count);
+      for (UINT index = 0; index < count; ++index) {
+        IMMDevice *device = nullptr;
+        if (SUCCEEDED(devices->Item(index, &device)) && device) {
+          if (!is_target(device)) return device;
+          device->Release();
+        }
+      }
+      return nullptr;
+    }
+
+    std::wstring device_id(IMMDevice *device) {
+      if (!device) return {};
+      LPWSTR raw_id = nullptr;
+      if (FAILED(device->GetId(&raw_id)) || !raw_id) return {};
+      std::wstring id {raw_id};
+      CoTaskMemFree(raw_id);
+      return id;
     }
 
     WAVEFORMATEXTENSIBLE quad_pcm_format() {
@@ -163,7 +214,7 @@ namespace platf::dualsense_audio {
     std::atomic_bool mirror_active {false};
     std::atomic_int mirror_result {0};
 
-    int mirror_loop(std::stop_token stop) {
+    int mirror_session(std::stop_token stop) {
       com_scope_t com;
       if (!com.valid()) return -20;
       com_ptr_t<IMMDeviceEnumerator> enumerator;
@@ -171,7 +222,9 @@ namespace platf::dualsense_audio {
                                   __uuidof(IMMDeviceEnumerator), reinterpret_cast<void **>(enumerator.put())))) return -21;
 
       com_ptr_t<IMMDevice> source;
-      if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, source.put())) || !source) return -22;
+      *source.put() = find_mirror_source(enumerator.get());
+      if (!source) return -22;
+      const auto source_id = device_id(source.get());
       com_ptr_t<IMMDevice> target;
       *target.put() = find_target(enumerator.get());
       if (!target) return -23;
@@ -214,8 +267,18 @@ namespace platf::dualsense_audio {
       BOOST_LOG(info) << "DualSense test mirror active: Windows stereo duplicated to all four controller channels";
 
       int result = 0;
+      auto next_source_check = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
       while (!stop.stop_requested()) {
         const auto wait = WaitForSingleObject(event, 50);
+        if (std::chrono::steady_clock::now() >= next_source_check) {
+          next_source_check = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+          com_ptr_t<IMMDevice> current_source;
+          *current_source.put() = find_mirror_source(enumerator.get());
+          if (!current_source || device_id(current_source.get()) != source_id) {
+            result = 1;  // Windows changed its active output; reopen loopback on the new endpoint.
+            break;
+          }
+        }
         if (wait == WAIT_TIMEOUT) continue;
         if (wait != WAIT_OBJECT_0) {
           result = -29;
@@ -263,9 +326,21 @@ namespace platf::dualsense_audio {
       capture_client->Stop();
       render_client->Stop();
       CloseHandle(event);
-      mirror_active.store(false, std::memory_order_release);
-      BOOST_LOG(info) << "DualSense test mirror stopped with result " << result;
       return result;
+    }
+
+    int mirror_loop(std::stop_token stop) {
+      int result = 0;
+      do {
+        result = mirror_session(stop);
+        if (result == 1 && !stop.stop_requested()) {
+          BOOST_LOG(info) << "Windows default audio output changed; reopening DualSense test mirror";
+        }
+      } while (result == 1 && !stop.stop_requested());
+
+      mirror_active.store(false, std::memory_order_release);
+      BOOST_LOG(info) << "DualSense test mirror stopped with result " << (result == 1 ? 0 : result);
+      return result == 1 ? 0 : result;
     }
   }  // namespace
 
@@ -367,7 +442,11 @@ namespace platf::dualsense_audio {
     }
     mirror_result.store(0, std::memory_order_release);
     mirror_thread = std::jthread {[](std::stop_token stop) {
-      mirror_result.store(mirror_loop(stop), std::memory_order_release);
+      const auto result = mirror_loop(stop);
+      mirror_result.store(result, std::memory_order_release);
+      if (result != 0) {
+        BOOST_LOG(error) << "DualSense test mirror failed with result " << result;
+      }
     }};
     return 0;
   }
