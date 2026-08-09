@@ -4,18 +4,45 @@ install(TARGETS sunshine RUNTIME DESTINATION "." COMPONENT application)
 # Hardening: include zlib1.dll (loaded via LoadLibrary() in openssl's libcrypto.a)
 install(FILES "${ZLIB}" DESTINATION "." COMPONENT application)
 
-# ViGEmBus installer
-set(VIGEMBUS_INSTALLER "${CMAKE_BINARY_DIR}/vigembus_installer.exe")
-file(DOWNLOAD
-        "https://github.com/nefarius/ViGEmBus/releases/download/v1.21.442.0/ViGEmBus_1.21.442_x64_x86_arm64.exe"
-        ${VIGEMBUS_INSTALLER}
-        SHOW_PROGRESS
-        EXPECTED_HASH SHA256=155c50f1eec07bdc28d2f61a3e3c2c6c132fee7328412de224695f89143316bc
-        TIMEOUT 60
-)
-install(FILES ${VIGEMBUS_INSTALLER}
+# Pin the complete, tested native DualSense runtime. These are the exact
+# binaries used by the known-good Apollo Extended installation; packaging must
+# never silently replace them with a newer upstream release.
+set(DUALSENSE_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/third-party/windows-dualsense-runtime")
+set(DUALSENSE_RUNTIME_FILES
+        "libvirtualhid-Windows-Driver-installer.msi"
+        "USBip-0.9.7.7-x64.exe"
+        "ViGEmBus_1.21.442_x64_x86_arm64.exe"
+        "viiper.exe")
+set(DUALSENSE_RUNTIME_SHA256_libvirtualhid_Windows_Driver_installer_msi "2cf6f3f42cb9058a073138d68ca2ed1a8cc8e5826c9e8ac225c1b9d9e3a8bb7b")
+set(DUALSENSE_RUNTIME_SHA256_USBip_0_9_7_7_x64_exe "51620fa5f9f8be5932bc9d786deee557ce06d5407a99cab490dcfac71f185fea")
+set(DUALSENSE_RUNTIME_SHA256_ViGEmBus_1_21_442_x64_x86_arm64_exe "155c50f1eec07bdc28d2f61a3e3c2c6c132fee7328412de224695f89143316bc")
+set(DUALSENSE_RUNTIME_SHA256_viiper_exe "90254e1352bff7607dbee0819f0750032f76c52cd9bf54150d21267224ba8f7a")
+foreach(DUALSENSE_RUNTIME_NAME IN LISTS DUALSENSE_RUNTIME_FILES)
+    string(MAKE_C_IDENTIFIER "${DUALSENSE_RUNTIME_NAME}" DUALSENSE_RUNTIME_ID)
+    set(DUALSENSE_RUNTIME_SHA256 "${DUALSENSE_RUNTIME_SHA256_${DUALSENSE_RUNTIME_ID}}")
+    set(DUALSENSE_RUNTIME_PATH "${DUALSENSE_RUNTIME_DIR}/${DUALSENSE_RUNTIME_NAME}")
+    if(NOT EXISTS "${DUALSENSE_RUNTIME_PATH}")
+        message(FATAL_ERROR "Missing pinned DualSense runtime file: ${DUALSENSE_RUNTIME_PATH}")
+    endif()
+    file(SHA256 "${DUALSENSE_RUNTIME_PATH}" DUALSENSE_RUNTIME_ACTUAL_SHA256)
+    if(NOT DUALSENSE_RUNTIME_ACTUAL_SHA256 STREQUAL DUALSENSE_RUNTIME_SHA256)
+        message(FATAL_ERROR "Hash mismatch for pinned DualSense runtime file: ${DUALSENSE_RUNTIME_NAME}")
+    endif()
+endforeach()
+
+install(FILES
+        "${DUALSENSE_RUNTIME_DIR}/libvirtualhid-Windows-Driver-installer.msi"
+        "${DUALSENSE_RUNTIME_DIR}/USBip-0.9.7.7-x64.exe"
+        DESTINATION "scripts"
+        COMPONENT gamepad)
+install(FILES "${DUALSENSE_RUNTIME_DIR}/ViGEmBus_1.21.442_x64_x86_arm64.exe"
         DESTINATION "scripts"
         RENAME "vigembus_installer.exe"
+        COMPONENT gamepad)
+install(FILES
+        "${DUALSENSE_RUNTIME_DIR}/viiper.exe"
+        "${DUALSENSE_RUNTIME_DIR}/VIIPER-LICENSES.txt"
+        DESTINATION "tools/viiper"
         COMPONENT gamepad)
 
 # Adding tools
@@ -29,8 +56,11 @@ install(TARGETS sunshinesvc RUNTIME DESTINATION "tools" COMPONENT application)
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/sudovda"
         DESTINATION "drivers"
         COMPONENT sudovda)
-install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/dualsense-audio"
+install(DIRECTORY "${DUALSENSE_RUNTIME_DIR}/dualsense-audio"
         DESTINATION "drivers"
+        COMPONENT gamepad)
+install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/dualsense-audio/devcon.exe"
+        DESTINATION "drivers/dualsense-audio"
         COMPONENT gamepad)
 
 # Mandatory scripts
@@ -121,7 +151,7 @@ set(CPACK_COMPONENT_FIREWALL_GROUP "Scripts")
 
 # gamepad scripts
 set(CPACK_COMPONENT_GAMEPAD_DISPLAY_NAME "Virtual Gamepad Drivers")
-set(CPACK_COMPONENT_GAMEPAD_DESCRIPTION "Installs libvirtualhid, the DualSense audio/haptics endpoint, and the ViGEmBus compatibility driver.")
+set(CPACK_COMPONENT_GAMEPAD_DESCRIPTION "Installs the tested VIIPER/usbip-win2 native DualSense runtime, libvirtualhid, the DualSense audio/HD-haptics endpoint, and ViGEmBus compatibility support.")
 set(CPACK_COMPONENT_GAMEPAD_GROUP "Drivers")
 set(CPACK_COMPONENT_GAMEPAD_REQUIRED true)
 

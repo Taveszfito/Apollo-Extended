@@ -1,0 +1,73 @@
+!include "nsDialogs.nsh"
+
+Var ApolloFullUninstallButton
+Var ApolloDriverRepairButton
+
+Page custom ApolloExtendedLandingPage ApolloExtendedLandingLeave
+
+Function ApolloExtendedLandingPage
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+    Abort
+  ${EndIf}
+
+  ${NSD_CreateLabel} 0 0 100% 28u "Apollo Extended setup"
+  Pop $0
+  CreateFont $1 "Segoe UI" 14 700
+  SendMessage $0 ${WM_SETFONT} $1 1
+
+  ${NSD_CreateLabel} 0 38u 100% 34u "Continue with Next to install or update Apollo Extended. Use Full uninstall to remove Apollo Extended and all of its bundled drivers and helper components."
+  Pop $0
+
+  ${NSD_CreateButton} 0 88u 128u 18u "Driver repair / reinstall"
+  Pop $ApolloDriverRepairButton
+  ${NSD_OnClick} $ApolloDriverRepairButton ApolloExtendedDriverRepair
+
+  ${NSD_CreateButton} 142u 88u 100u 18u "Full uninstall"
+  Pop $ApolloFullUninstallButton
+  ${NSD_OnClick} $ApolloFullUninstallButton ApolloExtendedFullUninstall
+
+  ${NSD_CreateLabel} 0 116u 100% 28u "Missing components are skipped automatically. Full uninstall exits setup without installing Apollo Extended."
+  Pop $0
+
+  nsDialogs::Show
+FunctionEnd
+
+Function ApolloExtendedDriverRepair
+  IfFileExists "$INSTDIR\scripts\USBip-0.9.7.7-x64.exe" 0 ApolloRepairUnavailable
+  InitPluginsDir
+  File /oname=$PLUGINSDIR\repair-gamepad.ps1 "@APOLLO_DRIVER_REPAIR_SCRIPT_NATIVE@"
+  File /oname=$PLUGINSDIR\install-gamepad.ps1 "@APOLLO_DRIVER_INSTALL_SCRIPT_NATIVE@"
+  File /oname=$PLUGINSDIR\install-dualsense-audio-device.ps1 "@APOLLO_AUDIO_INSTALL_SCRIPT_NATIVE@"
+  CopyFiles /SILENT "$PLUGINSDIR\install-gamepad.ps1" "$INSTDIR\scripts\install-gamepad.ps1"
+  CopyFiles /SILENT "$PLUGINSDIR\install-dualsense-audio-device.ps1" "$INSTDIR\scripts\install-dualsense-audio-device.ps1"
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\repair-gamepad.ps1" -InstallRoot "$INSTDIR"'
+  Return
+  ApolloRepairUnavailable:
+  MessageBox MB_OK|MB_ICONEXCLAMATION "The repair files are not installed yet. Complete the installation first, then run this installer again and choose Driver repair / reinstall."
+FunctionEnd
+
+Function ApolloExtendedLandingLeave
+  IfFileExists "$INSTDIR\sunshine.exe" 0 ApolloLandingCanContinue
+  MessageBox MB_OK|MB_ICONEXCLAMATION "An existing Apollo installation was found. Use Full uninstall first, wait for its completion message, restart Windows, then run this installer again."
+  Abort
+  ApolloLandingCanContinue:
+  ; Stop VIIPER before any component section starts extracting files.
+  nsExec::ExecToLog 'schtasks.exe /End /TN ApolloExtendedVIIPER'
+  nsExec::ExecToLog 'taskkill.exe /F /T /IM viiper.exe'
+FunctionEnd
+
+Function ApolloExtendedFullUninstall
+  MessageBox MB_YESNO|MB_ICONEXCLAMATION \
+    "This removes Apollo Extended, VIIPER, libvirtualhid, USBip, ViGEmBus, the DualSense audio driver, SudoVDA, and Apollo configuration files. Continue?" \
+    /SD IDNO IDNO ApolloFullUninstallCancelled
+
+  File /oname=$TEMP\ApolloExtendedFullUninstall.ps1 "@APOLLO_DRIVER_CLEANUP_SCRIPT_NATIVE@"
+  nsExec::ExecToLog 'schtasks.exe /End /TN ApolloExtendedVIIPER'
+  nsExec::ExecToLog 'taskkill.exe /F /T /IM viiper.exe'
+  Exec 'powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$TEMP\ApolloExtendedFullUninstall.ps1" -InstallRoot "$INSTDIR" -RemoveApollo -ShowResult'
+  Quit
+
+  ApolloFullUninstallCancelled:
+FunctionEnd

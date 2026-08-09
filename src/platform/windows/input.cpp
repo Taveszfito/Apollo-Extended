@@ -22,6 +22,8 @@
 #include "src/logging.h"
 #include "src/platform/common.h"
 #include "src/platform/virtualhid_input.h"
+#include "dualsense_audio.h"
+#include "viiper_dualsense.h"
 
 #ifdef __MINGW32__
 // DECLARE_HANDLE(HSYNTHETICPOINTERDEVICE);
@@ -41,6 +43,29 @@ namespace platf {
     65535,
     65535
   };
+
+  struct input_raw_t;
+
+  namespace {
+    bool service_installed(const wchar_t *name) {
+      const auto manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+      if (!manager) return false;
+      const auto service = OpenServiceW(manager, name, SERVICE_QUERY_STATUS);
+      if (service) CloseServiceHandle(service);
+      CloseServiceHandle(manager);
+      return service != nullptr;
+    }
+
+    bool system_file_exists(const wchar_t *relative_path) {
+      wchar_t windows_directory[MAX_PATH] {};
+      if (!GetWindowsDirectoryW(windows_directory, MAX_PATH)) return false;
+      std::wstring path {windows_directory};
+      path += relative_path;
+      return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+    }
+
+    void report_extended_driver_health(const input_raw_t &raw);
+  }  // namespace
 
   using client_t = util::safe_ptr<_VIGEM_CLIENT_T, vigem_free>;
   using target_t = util::safe_ptr<_VIGEM_TARGET_T, vigem_target_free>;
@@ -205,7 +230,8 @@ namespace platf {
       VIGEM_ERROR status = vigem_connect(client.get());
       if (!VIGEM_SUCCESS(status)) {
         // Log a special fatal message for this case to show the error in the web UI
-        BOOST_LOG(fatal) << "ViGEmBus is not installed or running. You must install ViGEmBus for gamepad support!"sv;
+        BOOST_LOG(fatal) << "ViGEmBus is not installed or running. Xbox 360 and DualShock 4 emulation are unavailable. Run Apollo Extended setup as administrator, choose Repair, restart Windows, and check install-dependencies-result.txt."sv;
+        return -1;
       } else {
         vigem_disconnect(client.get());
       }
@@ -454,6 +480,33 @@ namespace platf {
     decltype(DestroySyntheticPointerDevice) *fnDestroySyntheticPointerDevice;
   };
 
+  namespace {
+    void report_extended_driver_health(const input_raw_t &raw) {
+      const bool virtualhid_ready = raw.virtualhid.runtime && raw.virtualhid.runtime->capabilities().supports_gamepad;
+      if (!virtualhid_ready) {
+        BOOST_LOG(error) << "Apollo Extended dependency missing: libvirtualhid gamepad support is unavailable. Native virtual controllers cannot be created. Run setup as administrator, choose Repair, then restart Windows."sv;
+      }
+
+      const bool usbip_ready = service_installed(L"usbip2_ude") && service_installed(L"usbip2_filter");
+      if (!usbip_ready) {
+        BOOST_LOG(error) << "Apollo Extended dependency missing: usbip-win2 0.9.7.7 services were not found. Native USB DualSense/VIIPER mode is unavailable. Use Full uninstall, restart Windows, reinstall Apollo Extended, then restart again."sv;
+      }
+
+      if (!viiper_dualsense::runtime_available()) {
+        BOOST_LOG(error) << "Apollo Extended dependency missing: VIIPER is not responding on localhost:3242. Check the ApolloExtendedVIIPER scheduled task, verify usbip-win2 0.9.7.7, restart Windows, then run setup Repair if needed."sv;
+      }
+
+      const auto audio = dualsense_audio::endpoint_info();
+      if (!audio.present || !audio.quadraphonic) {
+        BOOST_LOG(error) << "Apollo Extended dependency missing: the 48 kHz four-channel DualSense Audio/HD-haptics endpoint is unavailable. The bundled driver is test-signed; disable Secure Boot, enable Windows test-signing mode, restart, and run setup Repair, or use a production-signed driver."sv;
+      }
+
+      if (!system_file_exists(L"\\System32\\drivers\\UMDF\\SudoVDA.dll")) {
+        BOOST_LOG(warning) << "Apollo Extended optional dependency missing: SudoVDA was not found. Virtual display creation is unavailable. Run setup as administrator with the SudoVDA component enabled, then restart Windows."sv;
+      }
+    }
+  }  // namespace
+
   input_t input() {
     input_t result {new input_raw_t {}};
     auto &raw = *(input_raw_t *) result.get();
@@ -463,6 +516,8 @@ namespace platf {
       delete raw.vigem;
       raw.vigem = nullptr;
     }
+
+    report_extended_driver_health(raw);
 
     // Get pointers to virtual touch/pen input functions (Win10 1809+)
     raw.fnCreateSyntheticPointerDevice = (decltype(CreateSyntheticPointerDevice) *) GetProcAddress(GetModuleHandleA("user32.dll"), "CreateSyntheticPointerDevice");
