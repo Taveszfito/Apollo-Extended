@@ -48,6 +48,7 @@ For the complete feature set, both sides must be Extended:
 
 - Host: [Apollo Extended](https://github.com/Taveszfito/Apollo-Extended)
 - Android client: [Artemis Android Extended](https://github.com/Taveszfito/moonlight-android)
+- Windows client: Under development
 
 The Extended controller-selection setting has no effect when connected to a standard Apollo or Sunshine host.
 
