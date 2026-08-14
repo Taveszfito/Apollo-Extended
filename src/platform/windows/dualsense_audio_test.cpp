@@ -26,10 +26,6 @@
 
 namespace platf::dualsense_audio {
   namespace {
-    constexpr GUID apollo_dualsense_container_id {
-      0xd5e054c0, 0x0ce6, 0x4c00, {0xae, 0x50, 0x41, 0x50, 0x4f, 0x4c, 0x4c, 0x4f}
-    };
-
     template<class T>
     class com_ptr_t {
     public:
@@ -92,6 +88,10 @@ namespace platf::dualsense_audio {
       return parent_id.data();
     }
 
+    bool is_viiper_target(IMMDevice *device) {
+      return contains_case_insensitive(parent_instance_id(device), L"USB\\VID_054C&PID_0CE6&MI_00");
+    }
+
     bool is_target(IMMDevice *device, std::wstring *friendly_name = nullptr) {
       com_ptr_t<IPropertyStore> properties;
       if (FAILED(device->OpenPropertyStore(STGM_READ, properties.put()))) return false;
@@ -100,17 +100,7 @@ namespace platf::dualsense_audio {
       const auto name_status = properties->GetValue(PKEY_Device_FriendlyName, &name);
       const auto has_name = SUCCEEDED(name_status) && name.vt == VT_LPWSTR && name.pwszVal;
 
-      PROPVARIANT container_id;
-      PropVariantInit(&container_id);
-      const auto container_status = properties->GetValue(PKEY_Device_ContainerId, &container_id);
-      const auto container_matches = SUCCEEDED(container_status) && container_id.vt == VT_CLSID &&
-                                     container_id.puuid != nullptr &&
-                                     IsEqualGUID(*container_id.puuid, apollo_dualsense_container_id);
-      PropVariantClear(&container_id);
-
-      const auto root_audio = contains_case_insensitive(parent_instance_id(device), L"ROOT\\MEDIA");
-      const auto name_matches = has_name && contains_case_insensitive(name.pwszVal, L"Apollo Extended DualSense Audio");
-      const auto matches = container_matches || name_matches || root_audio;
+      const auto matches = is_viiper_target(device);
       if (matches && friendly_name && has_name) *friendly_name = name.pwszVal;
       PropVariantClear(&name);
       return matches;
@@ -121,10 +111,15 @@ namespace platf::dualsense_audio {
       if (FAILED(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, devices.put()))) return nullptr;
       UINT count = 0;
       devices->GetCount(&count);
+      // Tests and the Windows mirror must use the actual VIIPER USB audio
+      // function. No persistent ROOT fallback is installed.
       for (UINT index = 0; index < count; ++index) {
         IMMDevice *device = nullptr;
         if (SUCCEEDED(devices->Item(index, &device)) && device) {
-          if (is_target(device, friendly_name)) return device;
+          if (is_viiper_target(device)) {
+            (void) is_target(device, friendly_name);
+            return device;
+          }
           device->Release();
         }
       }

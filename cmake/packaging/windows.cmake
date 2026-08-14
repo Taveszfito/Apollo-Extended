@@ -9,11 +9,9 @@ install(FILES "${ZLIB}" DESTINATION "." COMPONENT application)
 # never silently replace them with a newer upstream release.
 set(DUALSENSE_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/third-party/windows-dualsense-runtime")
 set(DUALSENSE_RUNTIME_FILES
-        "libvirtualhid-Windows-Driver-installer.msi"
         "USBip-0.9.7.7-x64.exe"
         "ViGEmBus_1.21.442_x64_x86_arm64.exe"
         "viiper.exe")
-set(DUALSENSE_RUNTIME_SHA256_libvirtualhid_Windows_Driver_installer_msi "2cf6f3f42cb9058a073138d68ca2ed1a8cc8e5826c9e8ac225c1b9d9e3a8bb7b")
 set(DUALSENSE_RUNTIME_SHA256_USBip_0_9_7_7_x64_exe "51620fa5f9f8be5932bc9d786deee557ce06d5407a99cab490dcfac71f185fea")
 set(DUALSENSE_RUNTIME_SHA256_ViGEmBus_1_21_442_x64_x86_arm64_exe "155c50f1eec07bdc28d2f61a3e3c2c6c132fee7328412de224695f89143316bc")
 set(DUALSENSE_RUNTIME_SHA256_viiper_exe "90254e1352bff7607dbee0819f0750032f76c52cd9bf54150d21267224ba8f7a")
@@ -31,7 +29,6 @@ foreach(DUALSENSE_RUNTIME_NAME IN LISTS DUALSENSE_RUNTIME_FILES)
 endforeach()
 
 install(FILES
-        "${DUALSENSE_RUNTIME_DIR}/libvirtualhid-Windows-Driver-installer.msi"
         "${DUALSENSE_RUNTIME_DIR}/USBip-0.9.7.7-x64.exe"
         DESTINATION "scripts"
         COMPONENT gamepad)
@@ -56,12 +53,9 @@ install(TARGETS sunshinesvc RUNTIME DESTINATION "tools" COMPONENT application)
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/sudovda"
         DESTINATION "drivers"
         COMPONENT sudovda)
-install(DIRECTORY "${DUALSENSE_RUNTIME_DIR}/dualsense-audio"
-        DESTINATION "drivers"
-        COMPONENT gamepad)
 install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/drivers/dualsense-audio/devcon.exe"
-        DESTINATION "drivers/dualsense-audio"
-        COMPONENT gamepad)
+        DESTINATION "drivers/sudovda"
+        COMPONENT sudovda)
 
 # Mandatory scripts
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/service/"
@@ -85,7 +79,8 @@ install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/firewall/"
         COMPONENT firewall)
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/gamepad/"
         DESTINATION "scripts"
-        COMPONENT gamepad)
+        COMPONENT gamepad
+        PATTERN "libvirtualhid-Windows-Driver-installer.msi" EXCLUDE)
 
 # Sunshine assets
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/assets/"
@@ -151,7 +146,7 @@ set(CPACK_COMPONENT_FIREWALL_GROUP "Scripts")
 
 # gamepad scripts
 set(CPACK_COMPONENT_GAMEPAD_DISPLAY_NAME "Virtual Gamepad Drivers")
-set(CPACK_COMPONENT_GAMEPAD_DESCRIPTION "Installs the tested VIIPER/usbip-win2 native DualSense runtime, libvirtualhid, the DualSense audio/HD-haptics endpoint, and ViGEmBus compatibility support.")
+set(CPACK_COMPONENT_GAMEPAD_DESCRIPTION "Installs the tested VIIPER/usbip-win2 native DualSense runtime and ViGEmBus compatibility support.")
 set(CPACK_COMPONENT_GAMEPAD_GROUP "Drivers")
 set(CPACK_COMPONENT_GAMEPAD_REQUIRED true)
 

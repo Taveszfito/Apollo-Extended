@@ -7,15 +7,14 @@ $ErrorActionPreference = 'Stop'
 $driverRoot = [IO.Path]::GetFullPath($DriverDirectory)
 $inf = Join-Path $driverRoot 'SudoVDA.inf'
 $certificate = Join-Path $driverRoot 'sudovda.cer'
-$devcon = [IO.Path]::GetFullPath((Join-Path $driverRoot '..\dualsense-audio\devcon.exe'))
+$devcon = Join-Path $driverRoot 'devcon.exe'
 $hardwareId = 'Root\SudoMaker\SudoVDA'
 
 function Get-SudoVdaDevice {
-    $signed = Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue |
-        Where-Object { $_.DriverProviderName -eq 'SudoMaker' -and $_.InfName -match '(?i)^oem\d+\.inf$' -and $_.DeviceName -eq 'SudoMaker Virtual Display Adapter' } |
+    Get-CimInstance Win32_PnPEntity `
+        -Filter "Name='SudoMaker Virtual Display Adapter'" -ErrorAction SilentlyContinue |
+        Where-Object { @($_.HardwareID) -contains $hardwareId } |
         Select-Object -First 1
-    if ($signed.DeviceID) { return Get-PnpDevice -InstanceId $signed.DeviceID -ErrorAction SilentlyContinue }
-    return $null
 }
 
 foreach ($required in @($inf, $certificate, $devcon)) {
@@ -33,7 +32,7 @@ if ($LASTEXITCODE -ne 0) { throw "Installing the SudoVDA publisher certificate f
 if ($LASTEXITCODE -notin @(0, 259)) { throw "Staging the SudoVDA driver failed with exit code $LASTEXITCODE." }
 
 $existing = Get-SudoVdaDevice
-if ($Force -or !$existing -or $existing.Status -ne 'OK' -or ($null -ne $existing.Problem -and [int]$existing.Problem -ne 0)) {
+if ($Force -or !$existing -or $existing.Status -ne 'OK' -or $existing.ConfigManagerErrorCode -ne 0) {
     if ($existing) {
         & "$env:SystemRoot\System32\pnputil.exe" /remove-device $existing.InstanceId | Out-Host
     }
@@ -46,8 +45,8 @@ $deadline = [DateTime]::UtcNow.AddSeconds(15)
 do {
     Start-Sleep -Milliseconds 300
     $device = Get-SudoVdaDevice
-    if ($device -and $device.Status -eq 'OK' -and ($null -eq $device.Problem -or [int]$device.Problem -eq 0)) { exit 0 }
+    if ($device -and $device.Status -eq 'OK' -and $device.ConfigManagerErrorCode -eq 0) { exit 0 }
 } while ([DateTime]::UtcNow -lt $deadline)
 
-$state = if ($device) { "status=$($device.Status), problem=$($device.Problem)" } else { 'device missing' }
+$state = if ($device) { "status=$($device.Status), problem=$($device.ConfigManagerErrorCode)" } else { 'device missing' }
 throw "SudoVDA was staged but did not become operational within 15 seconds ($state)."

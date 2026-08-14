@@ -25,22 +25,11 @@ function Test-Selected([string]$Name) {
 function Test-DriverStore([string]$Pattern) {
     return [bool](@(pnputil.exe /enum-drivers 2>$null) -match $Pattern)
 }
-function Get-DualSenseAudioDevice {
-    $signed = Get-CimInstance Win32_PnPSignedDriver -Filter "DeviceName='DualSense Wireless Controller'" `
-        -ErrorAction SilentlyContinue | Where-Object {
-            $_.InfName -match '(?i)^oem\d+\.inf$' -and $_.DriverProviderName -eq 'Apollo Extended'
-        } | Select-Object -First 1
-    if ($signed.DeviceID) {
-        return Get-PnpDevice -InstanceId $signed.DeviceID -ErrorAction SilentlyContinue
-    }
-    return $null
-}
 function Get-SudoVdaDevice {
-    $signed = Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue |
-        Where-Object { $_.DriverProviderName -eq 'SudoMaker' -and $_.InfName -match '(?i)^oem\d+\.inf$' -and $_.DeviceName -eq 'SudoMaker Virtual Display Adapter' } |
+    Get-CimInstance Win32_PnPEntity -Filter "Name='SudoMaker Virtual Display Adapter'" `
+        -ErrorAction SilentlyContinue |
+        Where-Object { @($_.HardwareID) -contains 'Root\SudoMaker\SudoVDA' } |
         Select-Object -First 1
-    if ($signed.DeviceID) { return Get-PnpDevice -InstanceId $signed.DeviceID -ErrorAction SilentlyContinue }
-    return $null
 }
 
 function Get-UsbipVersion {
@@ -76,42 +65,16 @@ if ((Get-FileHash -LiteralPath $viiperPath -Algorithm SHA256).Hash.ToLowerInvari
     throw "The bundled VIIPER executable failed its integrity check."
 }
 
-# Apollo Extended DualSense emulation requires the signed libvirtualhid driver.
-# MSI handles an already installed/current version as a repair or no-op.
-$virtualHidInstaller = Join-Path $scriptPath "libvirtualhid-Windows-Driver-installer.msi"
-Write-Host "[1/6] Checking libvirtualhid..."
-$virtualHidHealthy = Test-DriverStore "(?i)(libvirtualhid|Virtual HID)"
-try {
-if ((Test-Selected "libvirtualhid") -or !$virtualHidHealthy) {
-if (Test-Path -LiteralPath $virtualHidInstaller) {
-    $msiMode = if (Test-Selected "libvirtualhid") { "/fa" } else { "/i" }
-    $virtualHidInstall = Start-Process `
-        -FilePath "$env:SystemRoot\System32\msiexec.exe" `
-        -ArgumentList $msiMode, "`"$virtualHidInstaller`"", "/passive", "/norestart" `
-        -Wait -PassThru
-    if ($virtualHidInstall.ExitCode -notin @(0, 1641, 3010)) {
-        $installFailures.Add("libvirtualhid failed with exit code $($virtualHidInstall.ExitCode). Run Repair as administrator.")
-    } else { $actions.Add("libvirtualhid refreshed") }
-}
-else {
-    $installFailures.Add("The bundled libvirtualhid driver installer is missing. Download a complete Apollo Extended installer.")
-}
-}
-}
-catch {
-    $installFailures.Add("libvirtualhid: $($_.Exception.Message). Run Repair as administrator.")
-}
-
 # Native DualSense USB composite emulation requires exactly usbip-win2 0.9.7.7.
 # 0.9.7.8 is deliberately rejected because it is incompatible with the pinned
 # modified VIIPER runtime used by this Apollo build.
 $installedUsbip = Get-UsbipVersion
-Write-Host "[2/6] Checking usbip-win2..."
+Write-Host "[1/4] Checking usbip-win2..."
 if ($installedUsbip -and $installedUsbip -ne $requiredUsbipVersion) {
     $installFailures.Add("usbip-win2 $installedUsbip is incompatible. Use Full uninstall, restart Windows, then install again; VIIPER requires 0.9.7.7.")
 }
 try {
-Write-Host "[3/6] Checking VIIPER..."
+Write-Host "[2/4] Checking VIIPER..."
 if ((Test-Selected "usbip") -or !$installedUsbip -or $installedUsbip -ne $requiredUsbipVersion) {
     $usbip = Start-Process -FilePath $usbipInstaller -Wait -PassThru -ArgumentList `
         "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/RESTARTEXITCODE=3010"
@@ -156,7 +119,7 @@ catch {
 
 # ViGEm remains the compatibility backend for Xbox 360 and DualShock 4.
 $vigemPath = "$env:SystemRoot\System32\drivers\ViGEmBus.sys"
-Write-Host "[4/6] Checking ViGEmBus..."
+Write-Host "[3/4] Checking ViGEmBus..."
 $vigemVersion = if (Test-Path -LiteralPath $vigemPath) {
     try { [Version](Get-Item -LiteralPath $vigemPath).VersionInfo.FileVersion }
     catch { $null }
@@ -179,40 +142,17 @@ if ((Test-Selected "vigem") -or !$vigemVersion -or $vigemVersion -lt [Version]"1
     }
 }
 
-# Install the test-signed four-channel DualSense controller audio endpoint last.
-# Failure here must not prevent ViGEmBus, libvirtualhid, USBip or VIIPER setup.
 try {
-    Write-Host "[5/6] Checking DualSense Audio/HD haptics..."
-    $existingAudio = Get-DualSenseAudioDevice
-    if ((Test-Selected "dualsense-audio") -or !$existingAudio -or $existingAudio.Problem -notin @(0, $null)) {
-    $audioDriverDirectory = [IO.Path]::GetFullPath((Join-Path $scriptPath "..\drivers\dualsense-audio"))
-    $audioInf = Join-Path $audioDriverDirectory "VirtualAudioDriver.inf"
-    $audioDeviceInstaller = Join-Path $scriptPath "install-dualsense-audio-device.ps1"
-    if (!(Test-Path -LiteralPath $audioInf) -or !(Test-Path -LiteralPath $audioDeviceInstaller)) {
-        throw "The bundled DualSense audio driver package is missing."
-    }
-    & $audioDeviceInstaller -InfPath $audioInf -Force:(Test-Selected "dualsense-audio")
-    $audioDevice = Get-DualSenseAudioDevice
-    if (!$audioDevice -or $audioDevice.Problem -eq 52) {
-        throw "The test-signed DualSense audio driver is blocked. Disable Secure Boot and enable Windows test-signing mode, then run Repair; or install a production-signed driver package."
-    } else { $actions.Add("DualSense Audio/HD haptics refreshed") }
-    }
-}
-catch {
-    $installFailures.Add("DualSense Audio/HD haptics: $($_.Exception.Message)")
-}
-
-try {
-    Write-Host "[6/6] Checking SudoVDA..."
+    Write-Host "[4/4] Checking SudoVDA..."
     $sudovdaDevice = Get-SudoVdaDevice
-    $sudovdaHealthy = $sudovdaDevice -and $sudovdaDevice.Status -eq 'OK' -and ($null -eq $sudovdaDevice.Problem -or [int]$sudovdaDevice.Problem -eq 0)
+    $sudovdaHealthy = $sudovdaDevice -and $sudovdaDevice.Status -eq 'OK' -and $sudovdaDevice.ConfigManagerErrorCode -eq 0
     if ((Test-Selected "sudovda") -or !$sudovdaHealthy) {
         $sudovdaInstaller = Join-Path $scriptPath "install-sudovda-device.ps1"
         $sudovdaDriverRoot = Join-Path $installRoot "drivers\sudovda"
         if (!(Test-Path -LiteralPath $sudovdaInstaller)) { throw "The bundled SudoVDA repair script is missing." }
         & $sudovdaInstaller -DriverDirectory $sudovdaDriverRoot -Force:(Test-Selected "sudovda")
         $sudovdaDevice = Get-SudoVdaDevice
-        if (!$sudovdaDevice -or $sudovdaDevice.Status -ne 'OK' -or ($null -ne $sudovdaDevice.Problem -and [int]$sudovdaDevice.Problem -ne 0)) {
+        if (!$sudovdaDevice -or $sudovdaDevice.Status -ne 'OK' -or $sudovdaDevice.ConfigManagerErrorCode -ne 0) {
             throw "repair completed without a healthy display device."
         }
         $actions.Add("SudoVDA refreshed")

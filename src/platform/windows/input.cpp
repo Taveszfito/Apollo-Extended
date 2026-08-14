@@ -482,11 +482,6 @@ namespace platf {
 
   namespace {
     void report_extended_driver_health(const input_raw_t &raw) {
-      const bool virtualhid_ready = raw.virtualhid.runtime && raw.virtualhid.runtime->capabilities().supports_gamepad;
-      if (!virtualhid_ready) {
-        BOOST_LOG(error) << "Apollo Extended dependency missing: libvirtualhid gamepad support is unavailable. Native virtual controllers cannot be created. Run setup as administrator, choose Repair, then restart Windows."sv;
-      }
-
       const bool usbip_ready = service_installed(L"usbip2_ude") && service_installed(L"usbip2_filter");
       if (!usbip_ready) {
         BOOST_LOG(error) << "Apollo Extended dependency missing: usbip-win2 0.9.7.7 services were not found. Native USB DualSense/VIIPER mode is unavailable. Use Full uninstall, restart Windows, reinstall Apollo Extended, then restart again."sv;
@@ -498,7 +493,7 @@ namespace platf {
 
       const auto audio = dualsense_audio::endpoint_info();
       if (!audio.present || !audio.quadraphonic) {
-        BOOST_LOG(error) << "Apollo Extended dependency missing: the 48 kHz four-channel DualSense Audio/HD-haptics endpoint is unavailable. The bundled driver is test-signed; disable Secure Boot, enable Windows test-signing mode, restart, and run setup Repair, or use a production-signed driver."sv;
+        BOOST_LOG(info) << "The VIIPER 48 kHz four-channel DualSense audio/HD-haptics endpoint is not active. It appears when a virtual DualSense is connected."sv;
       }
 
       if (!system_file_exists(L"\\System32\\drivers\\UMDF\\SudoVDA.dll")) {
@@ -1834,8 +1829,7 @@ namespace platf {
     auto vigem = ((input_raw_t *) input)->vigem;
     auto enabled = vigem != nullptr;
     auto reason = enabled ? "" : "gamepads.vigem-not-available";
-    auto &virtualhid = ((input_raw_t *) input)->virtualhid;
-    auto dualsense_enabled = virtualhid.runtime && virtualhid.runtime->capabilities().supports_gamepad;
+    auto dualsense_enabled = viiper_dualsense::runtime_available();
     auto dualsense_reason = dualsense_enabled ? "" : "gamepads.virtualhid-not-available";
 
     // ds4 == ps4

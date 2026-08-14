@@ -1,6 +1,9 @@
 # NSIS Packaging
 # see options at: https://cmake.org/cmake/help/latest/cpack_gen/nsis.html
 
+set(CPACK_NSIS_DISPLAY_NAME "Apollo Extended")
+set(CPACK_NSIS_PACKAGE_NAME "Apollo Extended")
+
 set(CPACK_NSIS_INSTALLED_ICON_NAME "${PROJECT__DIR}\\\\${PROJECT_EXE}")
 
 cmake_path(CONVERT
@@ -12,9 +15,6 @@ cmake_path(CONVERT
 cmake_path(CONVERT
         "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/gamepad/install-gamepad.ps1"
         TO_NATIVE_PATH_LIST APOLLO_DRIVER_INSTALL_SCRIPT_NATIVE)
-cmake_path(CONVERT
-        "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/gamepad/install-dualsense-audio-device.ps1"
-        TO_NATIVE_PATH_LIST APOLLO_AUDIO_INSTALL_SCRIPT_NATIVE)
 string(REPLACE "\\" "\\\\" APOLLO_DRIVER_CLEANUP_SCRIPT
         "${APOLLO_DRIVER_CLEANUP_SCRIPT_NATIVE}")
 

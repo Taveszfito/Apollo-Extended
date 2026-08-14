@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 $scriptPath = if ($InstallRoot) { Join-Path $InstallRoot "scripts" } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 $installScript = Join-Path $scriptPath "install-gamepad.ps1"
-$components = @("libvirtualhid", "usbip", "viiper", "vigem", "dualsense-audio", "sudovda")
+$components = @("usbip", "viiper", "vigem", "sudovda")
 
 if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -43,7 +43,7 @@ if ($Mode -eq "Selected") {
     $form = [Windows.Forms.Form]@{ Text = "Apollo Extended - Select dependencies"; Width = 520; Height = 390; StartPosition = "CenterScreen" }
     $label = [Windows.Forms.Label]@{ Left = 16; Top = 14; Width = 470; Height = 38; Text = "Select the drivers/helpers to reinstall. Existing instances are safely refreshed or replaced." }
     $list = [Windows.Forms.CheckedListBox]@{ Left = 16; Top = 58; Width = 470; Height = 220; CheckOnClick = $true }
-    @("libvirtualhid - virtual controller bus", "usbip - native USB transport", "viiper - DualSense USB bridge helper", "vigem - Xbox 360 / DualShock 4 compatibility", "dualsense-audio - speaker and native HD haptics", "sudovda - Apollo virtual display") |
+    @("usbip - native USB transport", "viiper - DualSense USB bridge helper", "vigem - Xbox 360 / DualShock 4 compatibility", "sudovda - Apollo virtual display") |
         ForEach-Object { [void]$list.Items.Add($_, $false) }
     $ok = [Windows.Forms.Button]@{ Text = "Reinstall selected"; Left = 250; Top = 292; Width = 128; DialogResult = "OK" }
     $cancel = [Windows.Forms.Button]@{ Text = "Cancel"; Left = 388; Top = 292; Width = 98; DialogResult = "Cancel" }

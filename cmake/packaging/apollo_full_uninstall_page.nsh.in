@@ -39,9 +39,7 @@ Function ApolloExtendedDriverRepair
   InitPluginsDir
   File /oname=$PLUGINSDIR\repair-gamepad.ps1 "@APOLLO_DRIVER_REPAIR_SCRIPT_NATIVE@"
   File /oname=$PLUGINSDIR\install-gamepad.ps1 "@APOLLO_DRIVER_INSTALL_SCRIPT_NATIVE@"
-  File /oname=$PLUGINSDIR\install-dualsense-audio-device.ps1 "@APOLLO_AUDIO_INSTALL_SCRIPT_NATIVE@"
   CopyFiles /SILENT "$PLUGINSDIR\install-gamepad.ps1" "$INSTDIR\scripts\install-gamepad.ps1"
-  CopyFiles /SILENT "$PLUGINSDIR\install-dualsense-audio-device.ps1" "$INSTDIR\scripts\install-dualsense-audio-device.ps1"
   ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\repair-gamepad.ps1" -InstallRoot "$INSTDIR"'
   Return
   ApolloRepairUnavailable:
@@ -59,15 +57,36 @@ Function ApolloExtendedLandingLeave
 FunctionEnd
 
 Function ApolloExtendedFullUninstall
+  File /oname=$TEMP\ApolloExtendedFullUninstall.ps1 "@APOLLO_DRIVER_CLEANUP_SCRIPT_NATIVE@"
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$TEMP\ApolloExtendedFullUninstall.ps1" -DetectOnly -InstallRoot "$INSTDIR"' $0
+  StrCmp $0 "0" ApolloFullUninstallNothing
+  StrCmp $0 "10" ApolloFullUninstallConfirm
+  MessageBox MB_OK|MB_ICONSTOP "Apollo Extended dependency detection failed. Exit code: $0. No removal was attempted."
+  Return
+
+  ApolloFullUninstallNothing:
+  MessageBox MB_OK|MB_ICONINFORMATION "Nothing to remove. Apollo Extended and its owned virtual-device components were not found."
+  Return
+
+  ApolloFullUninstallConfirm:
   MessageBox MB_YESNO|MB_ICONEXCLAMATION \
-    "This removes Apollo Extended, VIIPER, libvirtualhid, USBip, ViGEmBus, the DualSense audio driver, SudoVDA, and Apollo configuration files. Continue?" \
+    "This removes Apollo Extended, VIIPER, SudoVDA, any legacy Apollo DualSense audio driver, and Apollo configuration files. Shared USBip and ViGEmBus system drivers are retained for system safety. Continue?" \
     /SD IDNO IDNO ApolloFullUninstallCancelled
 
-  File /oname=$TEMP\ApolloExtendedFullUninstall.ps1 "@APOLLO_DRIVER_CLEANUP_SCRIPT_NATIVE@"
   nsExec::ExecToLog 'schtasks.exe /End /TN ApolloExtendedVIIPER'
   nsExec::ExecToLog 'taskkill.exe /F /T /IM viiper.exe'
-  Exec 'powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$TEMP\ApolloExtendedFullUninstall.ps1" -InstallRoot "$INSTDIR" -RemoveApollo -ShowResult'
+  DetailPrint "Removing Apollo Extended and bundled dependencies..."
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$TEMP\ApolloExtendedFullUninstall.ps1" -InstallRoot "$INSTDIR" -RemoveApollo -LogPath "$TEMP\ApolloExtendedFullUninstall.log"' $0
+  IfFileExists "$INSTDIR\sunshine.exe" ApolloFullUninstallFailed 0
+  StrCmp $0 "0" ApolloFullUninstallSucceeded ApolloFullUninstallFailed
+
+  ApolloFullUninstallSucceeded:
+  MessageBox MB_OK|MB_ICONINFORMATION "Apollo Extended and its detected dependencies were removed. Restart Windows before reinstalling."
   Quit
+
+  ApolloFullUninstallFailed:
+  MessageBox MB_OK|MB_ICONSTOP "Full uninstall did not complete. Exit code: $0.$\r$\n$\r$\nLog: $TEMP\ApolloExtendedFullUninstall.log"
+  Return
 
   ApolloFullUninstallCancelled:
 FunctionEnd
