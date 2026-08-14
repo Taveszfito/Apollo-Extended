@@ -3,6 +3,7 @@
 
 set(CPACK_NSIS_DISPLAY_NAME "Apollo Extended")
 set(CPACK_NSIS_PACKAGE_NAME "Apollo Extended")
+set(CPACK_PACKAGE_FILE_NAME "Apollo-Extended")
 
 set(CPACK_NSIS_INSTALLED_ICON_NAME "${PROJECT__DIR}\\\\${PROJECT_EXE}")
 
