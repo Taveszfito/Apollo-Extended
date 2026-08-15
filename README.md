@@ -6,7 +6,9 @@ The VIIPER-powered backend presents games with a USB composite DualSense using S
 
 Apollo forwards buttons, sticks, analog triggers, touchpad input, battery information, and calibrated motion data from an Extended client to the virtual controller.
 
-Feedback travels in the opposite direction: adaptive triggers, conventional rumble, lightbar and player LEDs, microphone LED state, controller-speaker audio, and native game-generated HD haptics can reach the physical DualSense without being reduced to ordinary rumble.
+Feedback travels in the opposite direction: adaptive triggers, conventional rumble, lightbar and player LEDs, controller-speaker audio, and HD haptics are forwarded to the physical DualSense.
+
+Microphone audio can also be forwarded from supported Extended clients to the host, while the physical controller's microphone LED state is managed locally by the client.
 
 ## Extended controller selection
 
@@ -26,11 +28,21 @@ Apollo Extended currently supports two Extended clients.
 
 The HCI Bridge bypasses Android's standard Bluetooth limitations by using a dedicated USB Bluetooth adapter, enabling wireless DualSense functionality including HD haptics, adaptive triggers, controller-speaker audio, lighting, touchpad, and motion input.
 
+Microphone forwarding is not currently supported by Artemis Android Extended.
+
 ### Moonlight Extended for Windows
 
 [Moonlight Extended](https://github.com/Taveszfito/moonlight-extended) adds native DualSense support to the Windows Moonlight client over both USB and Bluetooth.
 
-Supported functionality includes buttons, sticks, analog triggers, touchpad, motion input, adaptive triggers, standard rumble, HD haptics, controller-speaker audio, lightbar, player LEDs, and microphone LED control.
+Supported functionality includes buttons, sticks, analog triggers, touchpad, motion input, adaptive triggers, standard rumble, HD haptics, controller-speaker audio, lightbar, player LEDs, microphone LED control, and microphone forwarding to the host.
+
+## Microphone forwarding
+
+Apollo Extended can receive microphone audio from supported Extended clients and expose it as a microphone input on the host PC.
+
+Microphone forwarding uses the Steam Streaming audio drivers, so Steam must be installed on the host PC for this feature to work.
+
+Currently, microphone forwarding is supported only by Moonlight Extended for Windows.
 
 ## Diagnostics and recovery
 
@@ -65,8 +77,10 @@ The complete native controller, speaker, and HD-haptics path has been verified i
 
 Full native DualSense functionality requires:
 
-- [Apollo Extended](https://github.com/Taveszfito/Apollo-Extended) on the host
-- [Artemis Android Extended](https://github.com/Taveszfito/moonlight-android) or [Moonlight Extended for Windows](https://github.com/Taveszfito/moonlight-extended) on the client
+* [Apollo Extended](https://github.com/Taveszfito/Apollo-Extended) on the host
+* [Artemis Android Extended](https://github.com/Taveszfito/moonlight-android) or [Moonlight Extended for Windows](https://github.com/Taveszfito/moonlight-extended) on the client
+
+Microphone forwarding additionally requires Steam and its Steam Streaming audio drivers on the host and is currently supported only by Moonlight Extended for Windows.
 
 The native composite backend uses [VIIPER](https://github.com/hbashton/VIIPER) with the bundled `usbip-win2` runtime.
 
