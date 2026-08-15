@@ -6,6 +6,7 @@
 
 // standard includes
 #include <format>
+#include <mutex>
 
 // platform includes
 #include <Audioclient.h>
@@ -39,7 +40,8 @@ DEFINE_PROPERTYKEY(PKEY_DeviceInterface_FriendlyName, 0x026e516e, 0xb814, 0x414b
 namespace {
 
   constexpr auto SAMPLE_RATE = 48000;
-  constexpr auto STEAM_AUDIO_DRIVER_PATH = L"%CommonProgramFiles(x86)%\\Steam\\drivers\\Windows10\\" STEAM_DRIVER_SUBDIR L"\\SteamStreamingSpeakers.inf";
+  constexpr auto STEAM_SPEAKERS_DRIVER_PATH = L"%CommonProgramFiles(x86)%\\Steam\\drivers\\Windows10\\" STEAM_DRIVER_SUBDIR L"\\SteamStreamingSpeakers.inf";
+  constexpr auto STEAM_MICROPHONE_DRIVER_PATH = L"%CommonProgramFiles(x86)%\\Steam\\drivers\\Windows10\\" STEAM_DRIVER_SUBDIR L"\\SteamStreamingMicrophone.inf";
 
   constexpr auto waveformat_mask_stereo = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
 
@@ -1064,14 +1066,39 @@ namespace platf::audio {
         return false;
       }
 
-      // Get the current default audio device (if present)
+      // Keep both defaults stable. Windows may select either newly installed Steam
+      // endpoint as the default while the audio subsystem is reconfiguring.
       auto old_default_dev = default_device(device_enum);
+      device_t old_default_capture;
+      device_enum->GetDefaultAudioEndpoint(eCapture, eConsole, &old_default_capture);
 
-      // Install the Steam Streaming Speakers driver
-      WCHAR driver_path[MAX_PATH] = {};
-      ExpandEnvironmentStringsW(STEAM_AUDIO_DRIVER_PATH, driver_path, ARRAYSIZE(driver_path));
-      if (fn_DiInstallDriverW(nullptr, driver_path, 0, nullptr)) {
-        BOOST_LOG(info) << "Successfully installed Steam Streaming Speakers"sv;
+      auto install_driver = [&](const wchar_t *expanded_path, const char *device_name) {
+        WCHAR driver_path[MAX_PATH] = {};
+        ExpandEnvironmentStringsW(expanded_path, driver_path, ARRAYSIZE(driver_path));
+        if (fn_DiInstallDriverW(nullptr, driver_path, 0, nullptr)) {
+          BOOST_LOG(info) << "Successfully installed " << device_name;
+          return true;
+        }
+
+        const auto err = GetLastError();
+        switch (err) {
+          case ERROR_ACCESS_DENIED:
+            BOOST_LOG(warning) << "Administrator privileges are required to install " << device_name;
+            break;
+          case ERROR_FILE_NOT_FOUND:
+          case ERROR_PATH_NOT_FOUND:
+            BOOST_LOG(info) << device_name << " driver not found. This is expected if Steam is not installed.";
+            break;
+          default:
+            BOOST_LOG(warning) << "Failed to install " << device_name << " driver: " << err;
+            break;
+        }
+        return false;
+      };
+
+      const bool speakers_installed = install_driver(STEAM_SPEAKERS_DRIVER_PATH, "Steam Streaming Speakers");
+      const bool microphone_installed = install_driver(STEAM_MICROPHONE_DRIVER_PATH, "Steam Streaming Microphone");
+      if (speakers_installed || microphone_installed) {
 
         // Wait for 5 seconds to allow the audio subsystem to reconfigure things before
         // modifying the default audio device or enumerating devices again.
@@ -1088,24 +1115,18 @@ namespace platf::audio {
           }
         }
 
-        return true;
-      } else {
-        auto err = GetLastError();
-        switch (err) {
-          case ERROR_ACCESS_DENIED:
-            BOOST_LOG(warning) << "Administrator privileges are required to install Steam Streaming Speakers"sv;
-            break;
-          case ERROR_FILE_NOT_FOUND:
-          case ERROR_PATH_NOT_FOUND:
-            BOOST_LOG(info) << "Steam audio drivers not found. This is expected if you don't have Steam installed."sv;
-            break;
-          default:
-            BOOST_LOG(warning) << "Failed to install Steam audio drivers: "sv << err;
-            break;
+        if (old_default_capture) {
+          audio::wstring_t old_default_capture_id;
+          old_default_capture->GetId(&old_default_capture_id);
+          for (int x = 0; x < (int) ERole_enum_count; ++x) {
+            policy->SetDefaultEndpoint(old_default_capture_id.get(), (ERole) x);
+          }
         }
 
-        return false;
+        return speakers_installed && microphone_installed;
       }
+
+      return false;
 #else
       BOOST_LOG(warning) << "Unable to install Steam Streaming Speakers on unknown architecture"sv;
       return false;
@@ -1166,11 +1187,15 @@ namespace platf {
       return nullptr;
     }
 
-    // Install Steam Streaming Speakers if needed. We do this during audio_control() to ensure
-    // the sink information returned includes the new Steam Streaming Speakers device.
-    if (config::audio.install_steam_drivers && !control->find_device_id(control->match_steam_speakers())) {
-      // This is best effort. Don't fail if it doesn't work.
-      control->install_steam_audio_drivers();
+    // Install both official Steam audio endpoints once per Apollo process. Checking only
+    // for Streaming Speakers is insufficient because older Apollo installs can have the
+    // speakers endpoint without the separately packaged microphone endpoint.
+    if (config::audio.install_steam_drivers) {
+      static std::once_flag steam_audio_install_once;
+      std::call_once(steam_audio_install_once, [&control]() {
+        // This is best effort. Don't fail if Steam is absent or elevation is unavailable.
+        control->install_steam_audio_drivers();
+      });
     }
 
     return control;

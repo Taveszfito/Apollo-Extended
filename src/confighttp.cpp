@@ -1191,7 +1191,17 @@ namespace confighttp {
       {"dualsense_audio_packets_captured", controller_diagnostics::dualsense_audio_packets_captured.load()},
       {"dualsense_audio_packets_sent", controller_diagnostics::dualsense_audio_packets_sent.load()},
       {"dualsense_audio_packets_dropped", controller_diagnostics::dualsense_audio_packets_dropped.load()},
-      {"dualsense_audio_packet_age_ms", age(controller_diagnostics::last_dualsense_audio_packet_ms.load())}
+      {"dualsense_audio_packet_age_ms", age(controller_diagnostics::last_dualsense_audio_packet_ms.load())},
+      {"microphone_driver_checked", controller_diagnostics::microphone_driver_checked.load()},
+      {"microphone_driver_found", controller_diagnostics::microphone_driver_found.load()},
+      {"microphone_stream_active", controller_diagnostics::microphone_stream_active.load()},
+      {"microphone_packets_received", controller_diagnostics::microphone_packets_received.load()},
+      {"microphone_frames_written", controller_diagnostics::microphone_frames_written.load()},
+      {"microphone_decode_errors", controller_diagnostics::microphone_decode_errors.load()},
+      {"microphone_packet_age_ms", age(controller_diagnostics::last_microphone_packet_ms.load())},
+      {"microphone_level_percent", controller_diagnostics::microphone_level_millipercent.load() / 1000.0},
+      {"microphone_monitor_enabled", controller_diagnostics::microphone_monitor_enabled.load()},
+      {"microphone_monitor_active", controller_diagnostics::microphone_monitor_active.load()}
     };
 #ifdef _WIN32
     const auto endpoint = platf::dualsense_audio::endpoint_info();
@@ -1231,6 +1241,12 @@ namespace confighttp {
         result = platf::dualsense_audio::set_system_audio_mirror(input.value("enabled", false));
       } else if (action == "reset") {
         result = platf::dualsense_audio::restart_endpoint();
+      } else if (action == "microphone-monitor") {
+        controller_diagnostics::microphone_monitor_enabled = input.value("enabled", false);
+        if (!controller_diagnostics::microphone_monitor_enabled.load()) {
+          controller_diagnostics::microphone_monitor_active = false;
+        }
+        result = 0;
       } else {
         bad_request(response, request, "Unknown DualSense audio action");
         return;

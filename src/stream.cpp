@@ -6,6 +6,9 @@
 // standard includes
 #include <fstream>
 #include <future>
+#include <algorithm>
+#include <cmath>
+#include <map>
 #include <queue>
 #ifdef _WIN32
 #include <deque>
@@ -15,6 +18,7 @@
 // lib includes
 #include <boost/endian/arithmetic.hpp>
 #include <openssl/err.h>
+#include <opus/opus.h>
 
 extern "C" {
   // clang-format off
@@ -41,6 +45,8 @@ extern "C" {
 #include "utility.h"
 #ifdef _WIN32
 #include "platform/windows/dualsense_audio.h"
+#include "platform/windows/mic_write.h"
+#include <objbase.h>
 #endif
 
 #define IDX_START_A 0
@@ -62,6 +68,7 @@ extern "C" {
 #define IDX_FILE_TRANSFER_NONCE_REQUEST 17
 #define IDX_SET_ADAPTIVE_TRIGGERS 18
 #define IDX_DUALSENSE_AUDIO 19
+#define IDX_MIC_AUDIO_DATA 20
 
 static const short packetTypes[] = {
   0x0305,  // Start A
@@ -84,6 +91,7 @@ static const short packetTypes[] = {
   0x3002,  // File transfer nonce request (Apollo protocol extension)
   0x5503,  // Set Adaptive triggers (Sunshine protocol extension)
   0x5504,  // DualSense quad audio (Apollo Extended protocol extension)
+  0x3003,  // Microphone Opus audio (Apollo Extended protocol extension)
 };
 
 namespace asio = boost::asio;
@@ -442,6 +450,17 @@ namespace stream {
       std::uint16_t sequence = 0;
       std::uint64_t dropped_packets = 0;
     } dualsense_audio;
+
+    struct {
+      std::unique_ptr<OpusDecoder, void (*)(OpusDecoder *)> decoder {nullptr, opus_decoder_destroy};
+      std::unique_ptr<platf::audio::mic_write_wasapi_t> sink;
+      std::unique_ptr<platf::audio::mic_write_wasapi_t> monitor_sink;
+      std::uint16_t expected_sequence = 0;
+      bool has_sequence = false;
+      std::uint64_t packets_received = 0;
+      std::uint64_t frames_written = 0;
+      std::uint64_t decode_errors = 0;
+    } microphone;
 #endif
 
     std::uint32_t launch_session_id;
@@ -1054,6 +1073,10 @@ namespace stream {
 
   void controlBroadcastThread(control_server_t *server) {
 #ifdef _WIN32
+    const HRESULT mic_com_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED | COINIT_SPEED_OVER_MEMORY);
+    if (FAILED(mic_com_result) && mic_com_result != RPC_E_CHANGED_MODE) {
+      BOOST_LOG(warning) << "[mic] Control thread COM initialization failed: "sv << mic_com_result;
+    }
     using dualsense_audio_packet_t =
       std::array<std::uint8_t, platf::dualsense_audio::bytes_per_packet>;
 #endif
@@ -1180,6 +1203,111 @@ namespace stream {
         return;
       }
     });
+
+#ifdef _WIN32
+    server->map(packetTypes[IDX_MIC_AUDIO_DATA], [](session_t *session, const std::string_view &payload) {
+      if (!(session->permission & crypto::PERM::_all_inputs)) {
+        BOOST_LOG(debug) << "Permission Microphone Input denied for [" << session->device_name << ']';
+        return;
+      }
+      if (!(session->config.encryptionFlagsEnabled & SS_ENC_CONTROL_V2)) {
+        BOOST_LOG(warning) << "[mic] Refusing microphone data without encrypted control stream"sv;
+        return;
+      }
+      if (payload.size() < 5 || payload.size() > 512) {
+        ++controller_diagnostics::microphone_decode_errors;
+        return;
+      }
+
+      const auto* bytes = reinterpret_cast<const std::uint8_t*>(payload.data());
+      if (bytes[2] != 1 || bytes[3] != 0) {
+        ++controller_diagnostics::microphone_decode_errors;
+        return;
+      }
+
+      auto& mic = session->microphone;
+      if (!mic.decoder || !mic.sink) {
+        int opus_error = OPUS_OK;
+        mic.decoder.reset(opus_decoder_create(48000, 1, &opus_error));
+        if (!mic.decoder || opus_error != OPUS_OK) {
+          ++controller_diagnostics::microphone_decode_errors;
+          BOOST_LOG(error) << "[mic] Opus decoder initialization failed: "sv << opus_strerror(opus_error);
+          return;
+        }
+
+        auto sink = std::make_unique<platf::audio::mic_write_wasapi_t>();
+        sink->requested_device_name = "Steam Streaming Microphone";
+        sink->autodetect_patterns = {L"Steam Streaming Microphone", L"Speakers (Steam Streaming Microphone)"};
+        if (sink->init() != 0) {
+          controller_diagnostics::microphone_driver_checked = true;
+          controller_diagnostics::microphone_driver_found = false;
+          mic.decoder.reset();
+          BOOST_LOG(warning) << "[mic] Steam Streaming Microphone endpoint unavailable"sv;
+          return;
+        }
+        controller_diagnostics::microphone_driver_found = true;
+        controller_diagnostics::microphone_driver_checked = true;
+        controller_diagnostics::microphone_stream_active = true;
+        mic.sink = std::move(sink);
+        BOOST_LOG(info) << "[mic] Client microphone passthrough active"sv;
+      }
+
+      const std::uint16_t sequence = (static_cast<std::uint16_t>(bytes[0]) << 8) | bytes[1];
+      if (mic.has_sequence && sequence != static_cast<std::uint16_t>(mic.expected_sequence + 1)) {
+        BOOST_LOG(debug) << "[mic] Sequence gap: expected "sv
+                         << static_cast<std::uint16_t>(mic.expected_sequence + 1) << " got "sv << sequence;
+      }
+      mic.expected_sequence = sequence;
+      mic.has_sequence = true;
+
+      std::array<float, 5760> pcm {};
+      const auto* opus_data = bytes + 4;
+      const auto opus_length = static_cast<opus_int32>(payload.size() - 4);
+      const int frames = opus_decode_float(mic.decoder.get(), opus_data, opus_length,
+                                           pcm.data(), static_cast<int>(pcm.size()), 0);
+      ++mic.packets_received;
+      ++controller_diagnostics::microphone_packets_received;
+      controller_diagnostics::last_microphone_packet_ms = controller_diagnostics::now_ms();
+      if (frames <= 0) {
+        ++mic.decode_errors;
+        ++controller_diagnostics::microphone_decode_errors;
+        return;
+      }
+
+      double sum_squares = 0.0;
+      for (int i = 0; i < frames; ++i) sum_squares += static_cast<double>(pcm[i]) * pcm[i];
+      const double rms = std::sqrt(sum_squares / frames);
+      controller_diagnostics::microphone_level_millipercent =
+        static_cast<int>(std::clamp(rms * 100000.0, 0.0, 100000.0));
+
+      if (controller_diagnostics::microphone_monitor_enabled.load()) {
+        if (!mic.monitor_sink) {
+          auto monitor = std::make_unique<platf::audio::mic_write_wasapi_t>();
+          monitor->use_default_render_device = true;
+          if (monitor->init() == 0) {
+            mic.monitor_sink = std::move(monitor);
+            controller_diagnostics::microphone_monitor_active = true;
+          } else {
+            controller_diagnostics::microphone_monitor_active = false;
+          }
+        }
+        if (mic.monitor_sink && mic.monitor_sink->write_pcm(pcm.data(), static_cast<std::uint32_t>(frames)) < 0) {
+          mic.monitor_sink.reset();
+          controller_diagnostics::microphone_monitor_active = false;
+        }
+      } else if (mic.monitor_sink) {
+        mic.monitor_sink.reset();
+        controller_diagnostics::microphone_monitor_active = false;
+      }
+
+      if (mic.sink->write_pcm(pcm.data(), static_cast<std::uint32_t>(frames)) < 0) {
+        controller_diagnostics::microphone_stream_active = false;
+        return;
+      }
+      ++mic.frames_written;
+      ++controller_diagnostics::microphone_frames_written;
+    });
+#endif
 
     server->map(packetTypes[IDX_ENCRYPTED], [server](session_t *session, const std::string_view &payload) {
       BOOST_LOG(verbose) << "type [IDX_ENCRYPTED]"sv;
@@ -2210,6 +2338,9 @@ namespace stream {
         session.dualsense_audio.stop.store(true, std::memory_order_release);
         session.dualsense_audio.thread.join();
       }
+      controller_diagnostics::microphone_stream_active = false;
+      session.microphone.sink.reset();
+      session.microphone.decoder.reset();
 #endif
       BOOST_LOG(debug) << "Waiting for control to end..."sv;
       session.controlEnd.view();

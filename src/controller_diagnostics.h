@@ -39,6 +39,17 @@ namespace controller_diagnostics {
   inline std::atomic<std::uint64_t> dualsense_audio_packets_dropped {};
   inline std::atomic<std::int64_t> last_dualsense_audio_packet_ms {};
 
+  inline std::atomic<bool> microphone_driver_found {};
+  inline std::atomic<bool> microphone_driver_checked {};
+  inline std::atomic<bool> microphone_stream_active {};
+  inline std::atomic<std::uint64_t> microphone_packets_received {};
+  inline std::atomic<std::uint64_t> microphone_frames_written {};
+  inline std::atomic<std::uint64_t> microphone_decode_errors {};
+  inline std::atomic<std::int64_t> last_microphone_packet_ms {};
+  inline std::atomic<int> microphone_level_millipercent {};
+  inline std::atomic<bool> microphone_monitor_enabled {};
+  inline std::atomic<bool> microphone_monitor_active {};
+
   inline std::int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now().time_since_epoch()).count();
