@@ -44,6 +44,14 @@ Microphone forwarding uses the Steam Streaming audio drivers, so Steam must be i
 
 Currently, microphone forwarding is supported only by Moonlight Extended for Windows.
 
+### DualSense audio and microphone support
+
+Both Extended clients support the complete Apollo audio-feedback path: controller-speaker audio, native HD haptics, conventional rumble, adaptive triggers, lightbar/player LEDs, and microphone LED state.
+
+Both clients can also forward either the **DualSense/controller microphone** or the **local client microphone** to Apollo's Steam Streaming Microphone device on the host. The controller mute button acts as a global microphone mute control for forwarding, independent of the selected source.
+
+When a headset is connected to the DualSense, both clients can route stream audio to the controller headset automatically and restore the built-in speaker route when it is unplugged. Artemis supports this over wired USB and its Bluetooth HCI Bridge; Moonlight Extended supports it over wired USB and Windows Bluetooth.
+
 ## Diagnostics and recovery
 
 The Troubleshooting page shows incoming Extended client input, VIIPER virtual-device submissions, game output reports, and native audio/HD-haptics activity.
