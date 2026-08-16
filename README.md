@@ -28,8 +28,6 @@ Apollo Extended currently supports two Extended clients.
 
 The HCI Bridge bypasses Android's standard Bluetooth limitations by using a dedicated USB Bluetooth adapter, enabling wireless DualSense functionality including HD haptics, adaptive triggers, controller-speaker audio, lighting, touchpad, and motion input.
 
-Microphone forwarding is not currently supported by Artemis Android Extended.
-
 ### Moonlight Extended for Windows
 
 [Moonlight Extended](https://github.com/Taveszfito/moonlight-extended) adds native DualSense support to the Windows Moonlight client over both USB and Bluetooth.
@@ -42,7 +40,7 @@ Apollo Extended can receive microphone audio from supported Extended clients and
 
 Microphone forwarding uses the Steam Streaming audio drivers, so Steam must be installed on the host PC for this feature to work.
 
-Currently, microphone forwarding is supported only by Moonlight Extended for Windows.
+Both Artemis Android Extended and Moonlight Extended for Windows support microphone forwarding.
 
 ### DualSense audio and microphone support
 
@@ -88,7 +86,7 @@ Full native DualSense functionality requires:
 * [Apollo Extended](https://github.com/Taveszfito/Apollo-Extended) on the host
 * [Artemis Android Extended](https://github.com/Taveszfito/moonlight-android) or [Moonlight Extended for Windows](https://github.com/Taveszfito/moonlight-extended) on the client
 
-Microphone forwarding additionally requires Steam and its Steam Streaming audio drivers on the host and is currently supported only by Moonlight Extended for Windows.
+Microphone forwarding additionally requires Steam and its Steam Streaming audio drivers on the host.
 
 The native composite backend uses [VIIPER](https://github.com/hbashton/VIIPER) with the bundled `usbip-win2` runtime.
 
