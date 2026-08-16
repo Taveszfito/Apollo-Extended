@@ -26,13 +26,13 @@ Apollo Extended currently supports two Extended clients.
 
 [Artemis Android Extended](https://github.com/Taveszfito/moonlight-android) adds advanced controller features, input customization, and a DualSense Bluetooth HCI Bridge for Android.
 
-The HCI Bridge bypasses Android's standard Bluetooth limitations by using a dedicated USB Bluetooth adapter, enabling wireless DualSense functionality including HD haptics, adaptive triggers, controller-speaker audio, lighting, touchpad, and motion input.
+The HCI Bridge bypasses Android's standard Bluetooth limitations by using a dedicated USB Bluetooth adapter. Supported functionality includes buttons, sticks, analog triggers, touchpad, motion input, adaptive triggers, standard rumble, HD haptics, controller-speaker and headset audio, lightbar, player LEDs, microphone LED control, and microphone forwarding to the host.
 
 ### Moonlight Extended for Windows
 
 [Moonlight Extended](https://github.com/Taveszfito/moonlight-extended) adds native DualSense support to the Windows Moonlight client over both USB and Bluetooth.
 
-Supported functionality includes buttons, sticks, analog triggers, touchpad, motion input, adaptive triggers, standard rumble, HD haptics, controller-speaker audio, lightbar, player LEDs, microphone LED control, and microphone forwarding to the host.
+Supported functionality includes buttons, sticks, analog triggers, touchpad, motion input, adaptive triggers, standard rumble, HD haptics, controller-speaker and headset audio, lightbar, player LEDs, microphone LED control, and microphone forwarding to the host.
 
 ## Microphone forwarding
 
