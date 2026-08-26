@@ -437,8 +437,10 @@ namespace platf::audio {
 
     // Use IEEE_FLOAT for WASAPI render stream (after PCM SetDeviceFormat above).
     // Buffer duration in REFERENCE_TIME (100-nanosecond units): ms * 10000.
-    // Uses mic_buffer_ms from config (default 50ms). Previously hardcoded to 100ms.
-    const REFERENCE_TIME buffer_duration = 50LL * 10000LL;
+    // Request one Opus frame. Shared-mode WASAPI may round this up to the
+    // endpoint's engine period, but requesting 50 ms needlessly guaranteed a
+    // larger buffer on devices that support a lower period.
+    const REFERENCE_TIME buffer_duration = 20LL * 10000LL;
     auto render_fmt = make_required_steam_mic_render_waveformat();
     hr = audio_client->Initialize(AUDCLNT_SHAREMODE_SHARED,
       AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
@@ -508,9 +510,12 @@ namespace platf::audio {
       for (std::uint32_t i = 0; i < frame_count; ++i) {
         pending_frames.push_back(std::clamp(samples[i], -1.0f, 1.0f));
       }
-      // Cap at 1 second to bound latency
-      if (pending_frames.size() > 48000) {
-        auto trim = pending_frames.size() - 48000;
+      // Keep a small recovery window, not a second of old speech. If the
+      // endpoint stalls longer than this, dropping the oldest microphone audio
+      // is preferable to replaying it with a steadily growing delay.
+      static constexpr std::size_t kMaximumQueuedFrames = 4800;  // 100 ms
+      if (pending_frames.size() > kMaximumQueuedFrames) {
+        auto trim = pending_frames.size() - kMaximumQueuedFrames;
         pending_frames.erase(pending_frames.begin(), pending_frames.begin() + (std::ptrdiff_t) trim);
       }
     }
@@ -532,7 +537,9 @@ namespace platf::audio {
     }
     platf::adjust_thread_priority(platf::thread_priority_e::high);
 
-    static constexpr std::size_t kPrebufFrames = 960 * 2;  // 2 Opus packets — matches mic_buffer_packets default
+    // One complete 20 ms packet is sufficient to absorb ordinary scheduling
+    // jitter. Two packets added a fixed extra 20 ms before every mic session.
+    static constexpr std::size_t kPrebufFrames = 960;
 
     while (!stop_render_thread.load(std::memory_order_acquire)) {
       WaitForSingleObject(render_event.get(), 20);
